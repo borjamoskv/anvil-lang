@@ -225,7 +225,10 @@ fn inv_term_uses_post(term: &InvTerm) -> bool {
     }
 }
 
-// --- Body encoding ---
+// --- Body encoding (SSA transformation) ---
+// Sequential assignments to the same variable are encoded as
+// intermediate Z3 vars: a += x; a += y → a_1 = a + x; a_post = a_1 + y
+// This eliminates the unsoundness of overwriting Z3 assertions.
 
 fn encode_body_effects<'ctx>(
     ctx: &'ctx Context,
@@ -235,30 +238,67 @@ fn encode_body_effects<'ctx>(
     post_vars: &HashMap<String, Int<'ctx>>,
 ) -> HashSet<String> {
     let mut modified = HashSet::new();
+    // Track the "current value" of each variable as we walk through statements
+    // Initially, current[x] = pre_vars[x]. After assignment, current[x] = new Z3 var.
+    let mut current_vars: HashMap<String, Int<'ctx>> = pre_vars.clone();
+    // SSA counter per variable
+    let mut ssa_counters: HashMap<String, usize> = HashMap::new();
 
     for stmt in &body.stmts {
-        if let Stmt::Assign { target, op, value } = stmt {
-            if let LValue::Ident(name) = target {
-                if let (Some(post_var), Some(pre_var)) = (post_vars.get(name), pre_vars.get(name)) {
-                    let encoded = match op {
-                        AssignOp::Assign => expr_to_z3(ctx, value, pre_vars),
-                        AssignOp::AddAssign => expr_to_z3(ctx, value, pre_vars)
-                            .map(|v| Int::add(ctx, &[pre_var, &v])),
-                        AssignOp::SubAssign => expr_to_z3(ctx, value, pre_vars)
-                            .map(|v| Int::sub(ctx, &[pre_var, &v])),
-                        AssignOp::MulAssign => expr_to_z3(ctx, value, pre_vars)
-                            .map(|v| Int::mul(ctx, &[pre_var, &v])),
-                        AssignOp::DivAssign => expr_to_z3(ctx, value, pre_vars)
-                            .map(|v| pre_var.div(&v)),
-                    };
-                    if let Some(result) = encoded {
-                        solver.assert(&post_var._eq(&result));
-                        modified.insert(name.clone());
+        match stmt {
+            Stmt::Assign { target, op, value } => {
+                if let LValue::Ident(name) = target {
+                    if let Some(current) = current_vars.get(name).cloned() {
+                        // Evaluate the RHS using current variable values (not pre!)
+                        let encoded = match op {
+                            AssignOp::Assign => expr_to_z3(ctx, value, &current_vars),
+                            AssignOp::AddAssign => expr_to_z3(ctx, value, &current_vars)
+                                .map(|v| Int::add(ctx, &[&current, &v])),
+                            AssignOp::SubAssign => expr_to_z3(ctx, value, &current_vars)
+                                .map(|v| Int::sub(ctx, &[&current, &v])),
+                            AssignOp::MulAssign => expr_to_z3(ctx, value, &current_vars)
+                                .map(|v| Int::mul(ctx, &[&current, &v])),
+                            AssignOp::DivAssign => expr_to_z3(ctx, value, &current_vars)
+                                .map(|v| current.div(&v)),
+                        };
+
+                        if let Some(result) = encoded {
+                            // Create intermediate SSA variable
+                            let counter = ssa_counters.entry(name.clone()).or_insert(0);
+                            *counter += 1;
+
+                            let ssa_name = format!("{}_ssa_{}", name, counter);
+                            let ssa_var = Int::new_const(ctx, ssa_name.as_str());
+
+                            // Assert: ssa_var == computed_result
+                            solver.assert(&ssa_var._eq(&result));
+
+                            // Update current value to the new SSA variable
+                            current_vars.insert(name.clone(), ssa_var);
+                            modified.insert(name.clone());
+                        }
                     }
                 }
-            }
+            },
+            Stmt::Let { name, value, .. } => {
+                // Local variable: create a Z3 variable and bind it
+                if let Some(z3_val) = expr_to_z3(ctx, value, &current_vars) {
+                    let local_var = Int::new_const(ctx, format!("local_{}", name).as_str());
+                    solver.assert(&local_var._eq(&z3_val));
+                    current_vars.insert(name.clone(), local_var);
+                }
+            },
+            _ => {} // Return, etc. — no effect on Z3 state
         }
     }
+
+    // Final step: connect the last SSA value of each modified variable to post_var
+    for name in &modified {
+        if let (Some(final_val), Some(post_var)) = (current_vars.get(name), post_vars.get(name)) {
+            solver.assert(&post_var._eq(final_val));
+        }
+    }
+
     modified
 }
 

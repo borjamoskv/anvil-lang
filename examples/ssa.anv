@@ -1,0 +1,70 @@
+// ============================================================
+// EXAMPLE: SSA Body Encoding — Sequential Assignments
+//
+// Tests Anvil's ability to track multiple assignments to the
+// same variable through SSA (Static Single Assignment)
+// intermediate Z3 variables.
+// ============================================================
+
+// Two sequential additions to the same variable.
+// Pre-v0.4, this would FAIL because only the first
+// assignment was encoded. Now: a_ssa_1 = a + x, a_ssa_2 = a_ssa_1 + y
+fn double_add(a: u64, x: u64, y: u64) -> u64
+    where {
+        x > 0,
+        y > 0,
+        a >= 0,
+        a' == a + x + y
+    }
+{
+    a += x;
+    a += y;
+    return a;
+}
+
+// Three sequential operations: add, sub, add
+fn complex_sequence(balance: u64, deposit: u64, fee: u64, bonus: u64) -> u64
+    where {
+        deposit > 0,
+        fee > 0,
+        bonus > 0,
+        deposit > fee,
+        balance' == balance + deposit - fee + bonus
+    }
+{
+    balance += deposit;
+    balance -= fee;
+    balance += bonus;
+    return balance;
+}
+
+// Transfer using sequential ops on both sender and receiver
+fn transfer_sequential(sender: u64, receiver: u64, amount: u64, fee: u64) -> u64
+    where {
+        amount > 0,
+        fee > 0,
+        amount > fee,
+        sender >= amount,
+        sender' == sender - amount,
+        receiver' == receiver + amount - fee
+    }
+{
+    sender -= amount;
+    receiver += amount;
+    receiver -= fee;
+    return receiver;
+}
+
+// BROKEN: sequence that claims wrong final value
+fn sequence_broken(a: u64, x: u64, y: u64) -> u64
+    where {
+        x > 0,
+        y > 0,
+        a' == a + x
+    }
+{
+    // BUG: adds both x and y, but postcondition claims only x
+    a += x;
+    a += y;
+    return a;
+}
