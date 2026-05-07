@@ -1,15 +1,15 @@
 // ============================================================
-// EXAMPLE: ERC-4626 Vault with Verified Deposit/Withdraw
+// EXAMPLE: ERC-4626 Vault with Logical Invariants
 // 
-// A vault that accepts deposits and issues shares.
-// Invariants ensure conservation of value:
-// - Deposits increase both supply and assets equally
-// - Withdrawals decrease both supply and assets equally
-// - No shares can exist without backing assets
+// Demonstrates:
+// 1. Logical OR (||) in invariant expressions
+// 2. Logical AND (&&) in invariant expressions
+// 3. Contract-level deposit/withdraw with share tracking
+// 4. Intentionally broken withdraw for adversarial testing
 // ============================================================
 
 // Deposit: assets in, shares out (1:1 for simplicity)
-// The compiler PROVES total value is conserved.
+// The invariant uses || to express: "either nothing exists, or assets back shares"
 fn deposit(total_supply: u64, total_assets: u64, amount: u64) -> u64
     where {
         amount > 0,
@@ -22,19 +22,29 @@ fn deposit(total_supply: u64, total_assets: u64, amount: u64) -> u64
     return total_supply;
 }
 
-// Withdraw: shares in, assets out
-// The compiler PROVES no over-withdrawal is possible.
+// Withdraw with combined logical invariant:
+// shares > 0 AND supply >= shares AND assets >= shares
 fn withdraw(total_supply: u64, total_assets: u64, shares: u64) -> u64
     where {
-        shares > 0,
-        total_supply >= shares,
-        total_assets >= shares,
+        shares > 0 && total_supply >= shares && total_assets >= shares,
         total_supply' == total_supply - shares,
         total_assets' == total_assets - shares
     }
 {
     total_supply -= shares;
     total_assets -= shares;
+    return total_assets;
+}
+
+// Invariant with OR: either no shares exist, or assets > 0
+// This tests the || operator in invariant expressions
+fn check_solvency(total_supply: u64, total_assets: u64) -> u64
+    where {
+        total_supply == 0 || total_assets > 0,
+        total_supply' == total_supply,
+        total_assets' == total_assets
+    }
+{
     return total_assets;
 }
 
@@ -46,15 +56,12 @@ fn withdraw(total_supply: u64, total_assets: u64, shares: u64) -> u64
 
 fn withdraw_broken(total_supply: u64, total_assets: u64, shares: u64) -> u64
     where {
-        shares > 0,
-        total_supply >= shares,
-        total_assets >= shares,
+        shares > 0 && total_supply >= shares && total_assets >= shares,
         total_supply' == total_supply - shares,
         total_assets' == total_assets - shares
     }
 {
     // BUG: only decrement assets, not supply
-    // This leaves phantom shares circulating
     total_assets -= shares;
     return total_assets;
 }

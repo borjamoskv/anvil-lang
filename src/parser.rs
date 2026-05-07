@@ -127,6 +127,34 @@ fn parse_invariant(pair: pest::iterators::Pair<Rule>) -> Result<Invariant, Strin
 
 fn parse_invariant_expr(pair: pest::iterators::Pair<Rule>) -> Result<InvariantExpr, String> {
     match pair.as_rule() {
+        Rule::logical_or_expr => {
+            let mut inners: Vec<_> = pair.into_inner()
+                .filter(|p| p.as_rule() != Rule::or_inv_op)
+                .collect();
+            if inners.len() == 1 {
+                return parse_invariant_expr(inners.remove(0));
+            }
+            let mut left = parse_invariant_expr(inners.remove(0))?;
+            for inner in inners {
+                let right = parse_invariant_expr(inner)?;
+                left = InvariantExpr::Or(Box::new(left), Box::new(right));
+            }
+            Ok(left)
+        },
+        Rule::logical_and_expr => {
+            let mut inners: Vec<_> = pair.into_inner()
+                .filter(|p| p.as_rule() != Rule::and_inv_op)
+                .collect();
+            if inners.len() == 1 {
+                return parse_invariant_expr(inners.remove(0));
+            }
+            let mut left = parse_invariant_expr(inners.remove(0))?;
+            for inner in inners {
+                let right = parse_invariant_expr(inner)?;
+                left = InvariantExpr::And(Box::new(left), Box::new(right));
+            }
+            Ok(left)
+        },
         Rule::comparison_expr => {
             let mut inners: Vec<_> = pair.into_inner().collect();
             if inners.len() == 1 {

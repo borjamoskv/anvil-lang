@@ -1,0 +1,88 @@
+// ============================================================
+// EXAMPLE: Mathematical Proofs via Invariants
+//
+// These examples demonstrate Anvil's ability to verify
+// complex mathematical relationships between inputs and
+// outputs — the foundation for loop reasoning.
+// ============================================================
+
+// Multiplication as repeated addition:
+// total' = total + amount * count
+fn accumulate(total: u64, amount: u64, count: u64) -> u64
+    where {
+        amount > 0,
+        count > 0,
+        total' == total + amount * count
+    }
+{
+    total += amount * count;
+    return total;
+}
+
+// Linear scaling: double both sides of a balance
+fn double_balance(balance: u64, supply: u64) -> u64
+    where {
+        balance > 0,
+        supply > 0,
+        balance' == balance * 2,
+        supply' == supply * 2
+    }
+{
+    balance *= 2;
+    supply *= 2;
+    return balance;
+}
+
+// Conservation across three accounts:
+// Moving funds from A through B to C preserves total
+fn three_way_transfer(a: u64, b: u64, c: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        a >= amount,
+        a' + b' + c' == a + b + c,
+        a' == a - amount,
+        c' == c + amount,
+        b' == b
+    }
+{
+    a -= amount;
+    c += amount;
+    return a;
+}
+
+// ============================================================
+// BROKEN: Accumulator that only adds once instead of N times
+// Counterexample: amount=1, count=2 → total'=1, should be 2
+// ============================================================
+
+fn accumulate_broken(total: u64, amount: u64, count: u64) -> u64
+    where {
+        amount > 0,
+        count > 0,
+        total' == total + amount * count
+    }
+{
+    // BUG: only adds amount once, not amount * count
+    total += amount;
+    return total;
+}
+
+// ============================================================
+// BROKEN: Three-way transfer that forgets conservation
+// ============================================================
+
+fn three_way_broken(a: u64, b: u64, c: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        a >= amount,
+        a' + b' + c' == a + b + c,
+        a' == a - amount,
+        c' == c + amount,
+        b' == b
+    }
+{
+    // BUG: decrements a but adds to b instead of c
+    a -= amount;
+    b += amount;
+    return a;
+}

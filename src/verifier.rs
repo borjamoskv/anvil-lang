@@ -32,15 +32,16 @@ pub struct VerifyResult {
 
 pub fn verify_program(program: &Program, type_env: &TypeEnv) -> Vec<VerifyResult> {
     let mut results = Vec::new();
+    let no_contract_invs: Vec<Invariant> = Vec::new();
     for item in &program.items {
         match item {
             Item::Function(f) if !f.invariants.is_empty() => {
-                results.push(verify_function(f, type_env));
+                results.push(verify_function(f, type_env, &no_contract_invs));
             },
             Item::Contract(c) => {
                 for f in &c.functions {
-                    if !f.invariants.is_empty() {
-                        results.push(verify_function(f, type_env));
+                    if !f.invariants.is_empty() || !c.invariants.is_empty() {
+                        results.push(verify_function(f, type_env, &c.invariants));
                     }
                 }
             },
@@ -50,7 +51,7 @@ pub fn verify_program(program: &Program, type_env: &TypeEnv) -> Vec<VerifyResult
     results
 }
 
-fn verify_function(func: &FnDef, type_env: &TypeEnv) -> VerifyResult {
+fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Invariant]) -> VerifyResult {
     let start = Instant::now();
     let cfg = Config::new();
     let ctx = Context::new(&cfg);
@@ -83,10 +84,22 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv) -> VerifyResult {
         }
     }
 
-    // Step 1: Assert preconditions
+    // Contract-level invariants are assumed in pre-state and verified in post-state
+    // They represent global truths that MUST survive every function execution
+    let contract_pre_invs: Vec<&Invariant> = contract_invariants.iter().collect();
+
+    // Step 1: Assert preconditions (function-level)
     for pre in &preconditions {
         if let Some(z3_pre) = invariant_to_z3(&ctx, &pre.expr, &pre_vars, &post_vars) {
             solver.assert(&z3_pre);
+        }
+    }
+
+    // Step 1b: Assert contract invariants hold in pre-state
+    // (we assume the contract was in a valid state before this call)
+    for inv in &contract_pre_invs {
+        if let Some(z3_inv) = invariant_to_z3(&ctx, &inv.expr, &pre_vars, &pre_vars) {
+            solver.assert(&z3_inv);
         }
     }
 
@@ -102,9 +115,10 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv) -> VerifyResult {
         }
     }
 
-    // Step 4: Verify postconditions
+    // Step 4: Verify function postconditions
     let mut all_verified = true;
     let mut counterexample = None;
+    let total_postconditions = postconditions.len() + contract_invariants.len();
 
     for (i, post_inv) in postconditions.iter().enumerate() {
         solver.push();
@@ -137,11 +151,49 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv) -> VerifyResult {
         solver.pop(1);
     }
 
+    // Step 5: Verify contract-level invariants hold in post-state
+    for (i, contract_inv) in contract_invariants.iter().enumerate() {
+        solver.push();
+        // Contract invariants use post-state variables for both sides
+        // because we're checking the state AFTER the function executes
+        if let Some(z3_inv) = invariant_to_z3(&ctx, &contract_inv.expr, &post_vars, &post_vars) {
+            solver.assert(&z3_inv.not());
+            match solver.check() {
+                SatResult::Sat => {
+                    all_verified = false;
+                    let model = solver.get_model().unwrap();
+                    let mut ce = format!("Contract invariant #{} violated:\n", i + 1);
+                    for (name, var) in &pre_vars {
+                        if let Some(val) = model.eval(var, true) {
+                            ce.push_str(&format!("  {} = {}\n", name, val));
+                        }
+                    }
+                    for (name, var) in &post_vars {
+                        if let Some(val) = model.eval(var, true) {
+                            ce.push_str(&format!("  {}' = {}\n", name, val));
+                        }
+                    }
+                    if counterexample.is_none() {
+                        counterexample = Some(ce);
+                    }
+                },
+                SatResult::Unsat => { /* PROVEN — contract invariant preserved */ },
+                SatResult::Unknown => {
+                    all_verified = false;
+                    if counterexample.is_none() {
+                        counterexample = Some(format!("Contract invariant #{}: Z3 undecidable", i + 1));
+                    }
+                },
+            }
+        }
+        solver.pop(1);
+    }
+
     VerifyResult {
         fn_name: func.name.clone(),
-        invariants_checked: func.invariants.len(),
+        invariants_checked: func.invariants.len() + contract_invariants.len(),
         preconditions_count: preconditions.len(),
-        postconditions_count: postconditions.len(),
+        postconditions_count: total_postconditions,
         verified: all_verified,
         counterexample,
         duration_ms: start.elapsed().as_secs_f64() * 1000.0,

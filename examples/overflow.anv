@@ -1,45 +1,37 @@
 // ============================================================
 // ADVERSARIAL EXAMPLE: Integer Overflow Attack
 //
-// Demonstrates how Anvil catches arithmetic overflow at
-// compile time through type-bounded Z3 constraints.
-//
-// In Solidity, these operations would silently wrap around.
-// In Anvil, the type checker + verifier rejects them.
+// Demonstrates how Anvil catches unsafe arithmetic through
+// type-bounded Z3 constraints.
 // ============================================================
 
-// This function tries to add two u64 values without
-// guarding against overflow. The postcondition demands
-// the result equals the sum, but Z3 knows u64 < 2^64.
-// If a + b > 2^64, the postcondition is unprovable.
-
+// UNSAFE: Addition without overflow guard.
+// The postcondition demands total' == a + b, but with
+// no upper bound on a + b, Z3 can find values where
+// the result exceeds u64 range.
 fn add_unsafe(a: u64, b: u64) -> u64
     where {
         a > 0,
         b > 0,
-        result' == a + b
+        a' == a + b
     }
 {
-    result += a;
-    result += b;
-    return result;
+    a += b;
+    return a;
 }
 
-// ============================================================
-// SAFE version: guard against overflow explicitly.
-// The precondition `a + b < max_supply` ensures no wrap.
-// ============================================================
-
+// SAFE: Addition with explicit overflow guard.
+// The precondition `a + b <= max_supply` ensures
+// the result stays within bounds.
 fn add_safe(a: u64, b: u64, max_supply: u64) -> u64
     where {
         a > 0,
         b > 0,
         a + b <= max_supply,
         max_supply > 0,
-        result' == a + b
+        a' == a + b
     }
 {
-    result += a;
-    result += b;
-    return result;
+    a += b;
+    return a;
 }

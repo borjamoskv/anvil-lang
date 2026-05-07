@@ -1,0 +1,85 @@
+// ============================================================
+// EXAMPLE: Token Contract with Contract-Level Invariants
+//
+// Demonstrates Anvil's contract-level invariant enforcement.
+// The invariant block defines GLOBAL truths that MUST hold
+// after every function execution — not just individual
+// postconditions, but system-wide safety guarantees.
+//
+// Pattern: ERC-20 Token with conservation of total supply
+// ============================================================
+
+contract Token {
+    state total_supply: u64 = 0;
+    state owner_balance: u64 = 0;
+    state user_balance: u64 = 0;
+
+    // Contract-level invariant:
+    // The sum of all balances MUST equal total_supply
+    // This is the fundamental accounting equation.
+    // If this is ever violated, tokens have been created or
+    // destroyed without authorization — a critical bug.
+    invariant {
+        owner_balance + user_balance == total_supply
+    }
+
+    // Transfer between accounts: MUST preserve total_supply
+    pub fn transfer(owner_balance: u64, user_balance: u64, total_supply: u64, amount: u64) -> u64
+        where {
+            amount > 0,
+            owner_balance >= amount,
+            owner_balance' == owner_balance - amount,
+            user_balance' == user_balance + amount,
+            total_supply' == total_supply
+        }
+    {
+        owner_balance -= amount;
+        user_balance += amount;
+        return user_balance;
+    }
+
+    // Mint: creates new tokens (increases total_supply)
+    pub fn mint(owner_balance: u64, user_balance: u64, total_supply: u64, amount: u64) -> u64
+        where {
+            amount > 0,
+            owner_balance' == owner_balance + amount,
+            user_balance' == user_balance,
+            total_supply' == total_supply + amount
+        }
+    {
+        owner_balance += amount;
+        total_supply += amount;
+        return total_supply;
+    }
+}
+
+// ============================================================
+// BROKEN contract: mint that forgets to update total_supply
+// The contract invariant owner + user == supply MUST fail
+// ============================================================
+
+contract BrokenToken {
+    state total_supply: u64 = 0;
+    state owner_balance: u64 = 0;
+    state user_balance: u64 = 0;
+
+    invariant {
+        owner_balance + user_balance == total_supply
+    }
+
+    // BUG: Mints to owner but doesn't increase total_supply
+    // Contract invariant will be violated:
+    // owner' = owner + amount, but supply' = supply
+    // → owner' + user' != supply'
+    pub fn mint_broken(owner_balance: u64, user_balance: u64, total_supply: u64, amount: u64) -> u64
+        where {
+            amount > 0,
+            owner_balance' == owner_balance + amount,
+            user_balance' == user_balance,
+            total_supply' == total_supply
+        }
+    {
+        owner_balance += amount;
+        return total_supply;
+    }
+}
