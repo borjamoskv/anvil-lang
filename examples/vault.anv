@@ -1,0 +1,60 @@
+// ============================================================
+// EXAMPLE: ERC-4626 Vault with Verified Deposit/Withdraw
+// 
+// A vault that accepts deposits and issues shares.
+// Invariants ensure conservation of value:
+// - Deposits increase both supply and assets equally
+// - Withdrawals decrease both supply and assets equally
+// - No shares can exist without backing assets
+// ============================================================
+
+// Deposit: assets in, shares out (1:1 for simplicity)
+// The compiler PROVES total value is conserved.
+fn deposit(total_supply: u64, total_assets: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        total_supply' == total_supply + amount,
+        total_assets' == total_assets + amount
+    }
+{
+    total_supply += amount;
+    total_assets += amount;
+    return total_supply;
+}
+
+// Withdraw: shares in, assets out
+// The compiler PROVES no over-withdrawal is possible.
+fn withdraw(total_supply: u64, total_assets: u64, shares: u64) -> u64
+    where {
+        shares > 0,
+        total_supply >= shares,
+        total_assets >= shares,
+        total_supply' == total_supply - shares,
+        total_assets' == total_assets - shares
+    }
+{
+    total_supply -= shares;
+    total_assets -= shares;
+    return total_assets;
+}
+
+// ============================================================
+// BROKEN: Withdraw that doesn't update total_supply
+// This simulates a share inflation attack.
+// Anvil MUST reject this.
+// ============================================================
+
+fn withdraw_broken(total_supply: u64, total_assets: u64, shares: u64) -> u64
+    where {
+        shares > 0,
+        total_supply >= shares,
+        total_assets >= shares,
+        total_supply' == total_supply - shares,
+        total_assets' == total_assets - shares
+    }
+{
+    // BUG: only decrement assets, not supply
+    // This leaves phantom shares circulating
+    total_assets -= shares;
+    return total_assets;
+}

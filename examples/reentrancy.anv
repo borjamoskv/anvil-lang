@@ -1,0 +1,46 @@
+// ============================================================
+// ADVERSARIAL EXAMPLE: Reentrancy Attack (The DAO Hack)
+// 
+// This contract is INTENTIONALLY BROKEN.
+// Anvil MUST reject it at verification time.
+//
+// The bug: withdraw sends funds BEFORE updating state.
+// In Solidity, an attacker can re-enter the withdraw() call
+// before the balance is decremented. In Anvil, the compiler
+// catches this because the postcondition is violated.
+// ============================================================
+
+// The DAO hack pattern: effects before state update.
+// The postcondition `balance' == balance - amount` will FAIL
+// because the body doesn't actually decrement the balance
+// before the external call (simulated here by returning early).
+
+fn withdraw_broken(balance: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        balance >= amount,
+        balance' == balance - amount
+    }
+{
+    // BUG: In a real reentrancy attack, the external call
+    // happens here, and the attacker re-enters before
+    // the balance is updated. We simulate this by
+    // returning without modifying balance.
+    return balance;
+}
+
+// ============================================================
+// The CORRECT version: state update before effects.
+// This one MUST pass verification.
+// ============================================================
+
+fn withdraw_safe(balance: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        balance >= amount,
+        balance' == balance - amount
+    }
+{
+    balance -= amount;
+    return balance;
+}

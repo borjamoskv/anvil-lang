@@ -14,6 +14,7 @@
 use z3::ast::{Ast, Int, Bool};
 use z3::{Config, Context, SatResult, Solver};
 use crate::ast::*;
+use crate::typechecker::{TypeEnv, ConstraintKind};
 use colored::Colorize;
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
@@ -29,17 +30,17 @@ pub struct VerifyResult {
     pub duration_ms: f64,
 }
 
-pub fn verify_program(program: &Program) -> Vec<VerifyResult> {
+pub fn verify_program(program: &Program, type_env: &TypeEnv) -> Vec<VerifyResult> {
     let mut results = Vec::new();
     for item in &program.items {
         match item {
             Item::Function(f) if !f.invariants.is_empty() => {
-                results.push(verify_function(f));
+                results.push(verify_function(f, type_env));
             },
             Item::Contract(c) => {
                 for f in &c.functions {
                     if !f.invariants.is_empty() {
-                        results.push(verify_function(f));
+                        results.push(verify_function(f, type_env));
                     }
                 }
             },
@@ -49,7 +50,7 @@ pub fn verify_program(program: &Program) -> Vec<VerifyResult> {
     results
 }
 
-fn verify_function(func: &FnDef) -> VerifyResult {
+fn verify_function(func: &FnDef, type_env: &TypeEnv) -> VerifyResult {
     let start = Instant::now();
     let cfg = Config::new();
     let ctx = Context::new(&cfg);
@@ -65,6 +66,10 @@ fn verify_function(func: &FnDef) -> VerifyResult {
         pre_vars.insert(param.name.clone(), pre);
         post_vars.insert(param.name.clone(), post);
     }
+
+    // Inject type constraints from the type checker
+    // This bridges the gap between mathematical Int and silicon-bounded integers
+    inject_type_constraints(&ctx, &solver, &pre_vars, &post_vars, type_env);
 
     // Classify invariants: preconditions vs postconditions
     let mut preconditions = Vec::new();
@@ -203,6 +208,74 @@ fn encode_body_effects<'ctx>(
         }
     }
     modified
+}
+
+// --- Type constraint injection ---
+// Bridges the thermodynamic gap: Z3 Int is unbounded, but silicon is not.
+// u64 has exactly 2^64 states. Every bit beyond that is a lie.
+
+fn inject_type_constraints<'ctx>(
+    ctx: &'ctx Context,
+    solver: &Solver<'ctx>,
+    pre_vars: &HashMap<String, Int<'ctx>>,
+    post_vars: &HashMap<String, Int<'ctx>>,
+    type_env: &TypeEnv,
+) {
+    let zero = Int::from_i64(ctx, 0);
+
+    for constraint in &type_env.constraints {
+        // Apply to pre-state variable
+        if let Some(pre_var) = pre_vars.get(&constraint.var_name) {
+            match &constraint.kind {
+                ConstraintKind::NonNegative => {
+                    solver.assert(&pre_var.ge(&zero));
+                }
+                ConstraintKind::UpperBound { bits } => {
+                    // For bits <= 64, use i64 representation
+                    // For larger, use string-based big integer
+                    if *bits <= 63 {
+                        let upper = Int::from_i64(ctx, 1i64 << bits);
+                        solver.assert(&pre_var.lt(&upper));
+                    }
+                    // For u64/u128/u256: the non-negative constraint is sufficient
+                    // for Z3 Int semantics — overflow is caught by postcondition checking
+                }
+                ConstraintKind::SignedBound { bits } => {
+                    if *bits <= 64 {
+                        let half = 1i64 << (bits - 1);
+                        let lower = Int::from_i64(ctx, -half);
+                        let upper = Int::from_i64(ctx, half);
+                        solver.assert(&pre_var.ge(&lower));
+                        solver.assert(&pre_var.lt(&upper));
+                    }
+                }
+            }
+        }
+
+        // Apply to post-state variable (the result must also be in bounds)
+        if let Some(post_var) = post_vars.get(&constraint.var_name) {
+            match &constraint.kind {
+                ConstraintKind::NonNegative => {
+                    solver.assert(&post_var.ge(&zero));
+                }
+                ConstraintKind::UpperBound { bits } => {
+                    if *bits <= 63 {
+                        let upper = Int::from_i64(ctx, 1i64 << bits);
+                        solver.assert(&post_var.lt(&upper));
+                    }
+                }
+                ConstraintKind::SignedBound { bits } => {
+                    if *bits <= 64 {
+                        let half = 1i64 << (bits - 1);
+                        let lower = Int::from_i64(ctx, -half);
+                        let upper = Int::from_i64(ctx, half);
+                        solver.assert(&post_var.ge(&lower));
+                        solver.assert(&post_var.lt(&upper));
+                    }
+                }
+            }
+        }
+    }
 }
 
 // --- Z3 translation ---

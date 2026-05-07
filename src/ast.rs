@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use serde::Serialize;
 
 #[derive(Debug, Clone, Serialize)]

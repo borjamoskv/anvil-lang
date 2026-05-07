@@ -4,6 +4,7 @@
 
 mod ast;
 mod parser;
+mod typechecker;
 mod verifier;
 mod codegen;
 
@@ -97,9 +98,21 @@ fn cmd_check(file: &PathBuf) {
 
     eprintln!("  {} Parsed: {} functions, {} invariants",
         "✓".bright_green(), fn_count, inv_count);
+
+    // Type checking pass — bridge mathematical abstraction to silicon bounds
+    eprintln!("  {} Type checking...", "→".bright_blue());
+    let type_env = typechecker::check_program(&program);
+    typechecker::print_type_report(&type_env);
+
+    if !type_env.errors.is_empty() {
+        eprintln!("  {} Type checking failed. Fix type errors before verification.",
+            "✗".bright_red().bold());
+        std::process::exit(1);
+    }
+
     eprintln!("  {} Verifying with Z3...", "→".bright_blue());
 
-    let results = verifier::verify_program(&program);
+    let results = verifier::verify_program(&program, &type_env);
     verifier::print_results(&results);
 
     let all_ok = results.iter().all(|r| r.verified);
@@ -127,8 +140,18 @@ fn cmd_build(file: &PathBuf, output: &PathBuf) {
         }
     };
 
+    // Type checking pass
+    eprintln!("  {} Type checking...", "→".bright_blue());
+    let type_env = typechecker::check_program(&program);
+    typechecker::print_type_report(&type_env);
+
+    if !type_env.errors.is_empty() {
+        eprintln!("  {} Type checking failed.", "✗".bright_red().bold());
+        std::process::exit(1);
+    }
+
     eprintln!("  {} Verifying with Z3...", "→".bright_blue());
-    let results = verifier::verify_program(&program);
+    let results = verifier::verify_program(&program, &type_env);
     verifier::print_results(&results);
 
     let all_ok = results.iter().all(|r| r.verified);
