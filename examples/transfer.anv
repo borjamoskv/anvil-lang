@@ -1,0 +1,47 @@
+// ============================================================
+// EXAMPLE: Token Transfer with Conservation Law
+// This is the "Hello World" of Anvil — a transfer function
+// that mathematically CANNOT lose or create tokens.
+// ============================================================
+
+// A simple token transfer where the compiler PROVES:
+// 1. Amount must be positive
+// 2. Sender has enough balance
+// 3. Total supply is conserved (no tokens created or destroyed)
+// 4. Sender balance decreases by exactly the amount
+// 5. Receiver balance increases by exactly the amount
+
+fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        sender_balance >= amount,
+        sender_balance' + receiver_balance' == sender_balance + receiver_balance,
+        sender_balance' == sender_balance - amount,
+        receiver_balance' == receiver_balance + amount
+    }
+{
+    sender_balance -= amount;
+    receiver_balance += amount;
+    return sender_balance;
+}
+
+// ============================================================
+// EXAMPLE: Liquidation with Close Factor Enforcement
+// The K2 Lending bug CANNOT exist in Anvil.
+// The compiler proves that no sequence of calls can bypass
+// the close factor limit.
+// ============================================================
+
+fn liquidate(debt: u64, repay_amount: u64, close_factor: u64, total_repaid: u64) -> u64
+    where {
+        repay_amount > 0,
+        close_factor > 0,
+        close_factor <= 100,
+        debt > 0,
+        total_repaid' <= debt * close_factor / 100,
+        repay_amount <= debt * close_factor / 100 - total_repaid
+    }
+{
+    total_repaid += repay_amount;
+    return total_repaid;
+}

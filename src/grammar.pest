@@ -1,0 +1,159 @@
+// ============================================================
+// ANVIL LANGUAGE GRAMMAR v0.1
+// "A language where trust doesn't compile."
+// ============================================================
+// PEG grammar for pest parser.
+// Designed for smart contracts & autonomous agents.
+// Every function carries its proof as a first-class citizen.
+// ============================================================
+
+// --- Whitespace & Comments ---
+WHITESPACE = _{ " " | "\t" | NEWLINE }
+COMMENT    = _{ line_comment | block_comment }
+line_comment  = _{ "//" ~ (!NEWLINE ~ ANY)* }
+block_comment = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
+
+// --- Program Structure ---
+program = { SOI ~ item* ~ EOI }
+item    = _{ fn_def | struct_def | const_def | contract_def }
+
+// --- Contract (module for smart contracts) ---
+contract_def = {
+    "contract" ~ ident ~ "{" ~ contract_body ~ "}"
+}
+contract_body = { (state_var | fn_def | invariant_block)* }
+state_var     = { "state" ~ ident ~ ":" ~ type_expr ~ ("=" ~ expr)? ~ ";" }
+
+// --- Function Definition ---
+fn_def = {
+    visibility? ~ "fn" ~ ident ~
+    "(" ~ param_list? ~ ")" ~
+    ("->" ~ type_expr)? ~
+    where_clause? ~
+    block
+}
+
+visibility = { "pub" }
+
+// --- Parameter List ---
+param_list = { param ~ ("," ~ param)* ~ ","? }
+param      = { "mut"? ~ ident ~ ":" ~ type_expr }
+
+// --- Where Clause (THE CORE INNOVATION) ---
+// Invariants are first-class citizens of the function signature.
+// The compiler MUST prove these hold, or the code doesn't compile.
+where_clause = {
+    "where" ~ "{" ~ invariant ~ ("," ~ invariant)* ~ ","? ~ "}"
+}
+
+invariant = { invariant_expr }
+
+// Invariant expressions support:
+// - Pre/post state: x (current), x' (after)
+// - Comparisons: ==, !=, <, >, <=, >=
+// - Arithmetic: +, -, *, /
+// - Logical: &&, ||, !
+// - Quantifiers: forall, exists
+// - Function calls for complex predicates
+invariant_expr = { quantifier | comparison_expr }
+
+quantifier = {
+    ("forall" | "exists") ~ ident ~ "in" ~ expr ~ ":" ~ invariant_expr
+}
+
+comparison_expr = { additive ~ (comparison_op ~ additive)* }
+comparison_op   = { "==" | "!=" | "<=" | ">=" | "<" | ">" }
+
+// --- Invariant Block (contract-level invariants) ---
+invariant_block = {
+    "invariant" ~ "{" ~ invariant ~ ("," ~ invariant)* ~ ","? ~ "}"
+}
+
+// --- Types ---
+type_expr = { array_type | map_type | option_type | result_type | base_type }
+
+base_type   = { "u8" | "u16" | "u32" | "u64" | "u128" | "u256"
+              | "i8" | "i16" | "i32" | "i64" | "i128"
+              | "bool" | "Address" | "String" | "Unit"
+              | ident }
+
+array_type  = { "[" ~ type_expr ~ "]" }
+map_type    = { "Map" ~ "<" ~ type_expr ~ "," ~ type_expr ~ ">" }
+option_type = { "Option" ~ "<" ~ type_expr ~ ">" }
+result_type = { "Result" ~ "<" ~ type_expr ~ "," ~ type_expr ~ ">" }
+
+// --- Struct Definition ---
+struct_def = {
+    visibility? ~ "struct" ~ ident ~ "{" ~ field_list? ~ "}"
+}
+field_list = { field ~ ("," ~ field)* ~ ","? }
+field      = { visibility? ~ ident ~ ":" ~ type_expr }
+
+// --- Const Definition ---
+const_def = {
+    "const" ~ ident ~ ":" ~ type_expr ~ "=" ~ expr ~ ";"
+}
+
+// --- Statements ---
+block = { "{" ~ stmt* ~ expr? ~ "}" }
+stmt  = _{ let_stmt | assign_stmt | if_stmt | while_stmt | return_stmt | assert_stmt | expr_stmt }
+
+let_stmt    = { "let" ~ "mut"? ~ ident ~ (":" ~ type_expr)? ~ "=" ~ expr ~ ";" }
+assign_stmt = { lvalue ~ assign_op ~ expr ~ ";" }
+assign_op   = { "+=" | "-=" | "*=" | "/=" | "=" }
+lvalue      = { ident ~ ("." ~ ident | "[" ~ expr ~ "]")* }
+
+if_stmt     = { "if" ~ expr ~ block ~ ("else" ~ (if_stmt | block))? }
+while_stmt  = { "while" ~ expr ~ where_clause? ~ block }
+return_stmt = { "return" ~ expr? ~ ";" }
+assert_stmt = { "assert" ~ "(" ~ expr ~ ("," ~ string_lit)? ~ ")" ~ ";" }
+expr_stmt   = { expr ~ ";" }
+
+// --- Expressions ---
+expr = { unary ~ (binary_op ~ unary)* }
+
+unary = _{ neg | not | primary }
+neg   =  { "-" ~ primary }
+not   =  { "!" ~ primary }
+
+primary = _{ literal | paren_expr | fn_call | field_access | ident_expr }
+
+paren_expr   = { "(" ~ expr ~ ")" }
+fn_call      = { (ident ~ "." ~ ident | ident) ~ "(" ~ arg_list? ~ ")" }
+field_access = { ident ~ ("." ~ ident)+ }
+ident_expr   = { ident_post }
+
+arg_list = { expr ~ ("," ~ expr)* ~ ","? }
+
+// --- Additive / Multiplicative (for invariants) ---
+additive       = { multiplicative ~ (add_op ~ multiplicative)* }
+add_op         = { "+" | "-" }
+multiplicative = { unary_inv ~ (mul_op ~ unary_inv)* }
+mul_op         = { "*" | "/" | "%" }
+unary_inv      = _{ neg_inv | primary_inv }
+neg_inv        =  { "-" ~ primary_inv }
+primary_inv    = _{ literal | paren_inv | fn_call_inv | field_access_inv | ident_post }
+paren_inv      =  { "(" ~ additive ~ ")" }
+fn_call_inv    =  { ident ~ "(" ~ (additive ~ ("," ~ additive)*)? ~ ")" }
+field_access_inv = { ident ~ ("." ~ ident_post)+ }
+
+// --- Binary Operators ---
+binary_op = _{ and_op | or_op | cmp_op | add_expr_op | mul_expr_op }
+and_op      = { "&&" }
+or_op       = { "||" }
+cmp_op      = { "==" | "!=" | "<=" | ">=" | "<" | ">" }
+add_expr_op = { "+" | "-" }
+mul_expr_op = { "*" | "/" | "%" }
+
+// --- Identifiers ---
+// ident_post supports the post-state notation: x' means "x after execution"
+ident      = @{ (ASCII_ALPHA | "_") ~ (ASCII_ALPHANUMERIC | "_")* }
+ident_post = @{ ident ~ "'"? }
+
+// --- Literals ---
+literal    = _{ bool_lit | hex_lit | num_lit | string_lit | address_lit }
+bool_lit   = { "true" | "false" }
+hex_lit    = @{ "0x" ~ ASCII_HEX_DIGIT+ }
+num_lit    = @{ ASCII_DIGIT+ ~ ("." ~ ASCII_DIGIT+)? }
+string_lit = @{ "\"" ~ (!"\"" ~ ANY)* ~ "\"" }
+address_lit = @{ "0x" ~ ASCII_HEX_DIGIT{40} }
