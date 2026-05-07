@@ -315,6 +315,8 @@ fn parse_block(pair: pest::iterators::Pair<Rule>) -> Result<Block, String> {
             Rule::assign_stmt => stmts.push(parse_assign_stmt(inner)?),
             Rule::return_stmt => stmts.push(parse_return_stmt(inner)?),
             Rule::assert_stmt => stmts.push(parse_assert_stmt(inner)?),
+            Rule::while_stmt => stmts.push(parse_while_stmt(inner)?),
+            Rule::if_stmt => stmts.push(parse_if_stmt(inner)?),
             Rule::expr_stmt => {
                 let expr_inner = inner.into_inner().next().unwrap();
                 stmts.push(Stmt::Expr(parse_expr(expr_inner)?));
@@ -377,6 +379,54 @@ fn parse_assert_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> 
     let condition = parse_expr(inners.next().unwrap())?;
     let message = inners.next().map(|p| p.as_str().trim_matches('"').to_string());
     Ok(Stmt::Assert { condition, message })
+}
+
+fn parse_while_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
+    let mut condition = Expr::BoolLit(true);
+    let mut invariants = Vec::new();
+    let mut body = Block { stmts: Vec::new(), expr: None };
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::expr => condition = parse_expr(inner)?,
+            Rule::where_clause => {
+                for wc in inner.into_inner() {
+                    if wc.as_rule() == Rule::invariant {
+                        invariants.push(parse_invariant(wc)?);
+                    }
+                }
+            },
+            Rule::block => body = parse_block(inner)?,
+            _ => {},
+        }
+    }
+    Ok(Stmt::While { condition, invariants, body })
+}
+
+fn parse_if_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
+    let mut condition = Expr::BoolLit(true);
+    let mut then_block = Block { stmts: Vec::new(), expr: None };
+    let mut else_block = None;
+
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::expr => condition = parse_expr(inner)?,
+            Rule::block => {
+                if then_block.stmts.is_empty() {
+                    then_block = parse_block(inner)?;
+                } else {
+                    else_block = Some(parse_block(inner)?);
+                }
+            },
+            Rule::if_stmt => {
+                // else-if: wrap in a block with a single if statement
+                let nested = parse_if_stmt(inner)?;
+                else_block = Some(Block { stmts: vec![nested], expr: None });
+            },
+            _ => {},
+        }
+    }
+    Ok(Stmt::If { condition, then_block, else_block })
 }
 
 fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, String> {

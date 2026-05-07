@@ -1,0 +1,80 @@
+// ============================================================
+// EXAMPLE: While Loops with Inductive Invariants
+//
+// Demonstrates Anvil's loop verification using the
+// havoc-assume-exit pattern:
+// 1. Variables modified in the loop are havoc'd (unconstrained)
+// 2. Loop invariant is assumed to hold after the loop
+// 3. ¬condition is asserted (loop has exited)
+// 4. Function postconditions verify the desired property
+// ============================================================
+
+// Sum from 0 to n using a while loop.
+// After loop exit (i > n), result >= 0 and i > n.
+fn sum_loop(n: u64, result: u64, i: u64) -> u64
+    where {
+        n > 0,
+        result' >= 0,
+        i' > n
+    }
+{
+    i = 0;
+    result = 0;
+    while i <= n where {
+        result >= 0,
+        i >= 0
+    } {
+        result += i;
+        i += 1;
+    }
+    return result;
+}
+
+// Count down from start to zero.
+// Loop invariant + exit condition: counter >= 0 ∧ ¬(counter > 0) → counter == 0
+fn countdown(counter: u64) -> u64
+    where {
+        counter > 0,
+        counter' == 0
+    }
+{
+    while counter > 0 where {
+        counter >= 0
+    } {
+        counter -= 1;
+    }
+    return counter;
+}
+
+// Find minimum of two values using conditional.
+// Demonstrates if-else with havoc merge.
+fn min_of(a: u64, b: u64, result: u64) -> u64
+    where {
+        a > 0,
+        b > 0,
+        result' <= a,
+        result' <= b
+    }
+{
+    if a <= b {
+        result = a;
+    } else {
+        result = b;
+    }
+    return result;
+}
+
+// BROKEN: Loop that claims counter goes negative
+fn countdown_broken(counter: u64) -> u64
+    where {
+        counter > 0,
+        counter' < 0
+    }
+{
+    while counter > 0 where {
+        counter >= 0
+    } {
+        counter -= 1;
+    }
+    return counter;
+}

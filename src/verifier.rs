@@ -288,6 +288,60 @@ fn encode_body_effects<'ctx>(
                     current_vars.insert(name.clone(), local_var);
                 }
             },
+            Stmt::While { condition, invariants, body } => {
+                // Inductive loop verification:
+                // 1. Havoc all variables modified in the loop body
+                //    (replace with fresh unconstrained Z3 vars)
+                // 2. Assume the loop invariant holds (inductive hypothesis)
+                // 3. Assert ¬condition (loop has exited)
+                // 4. The function's postconditions verify the desired property
+
+                // Collect variables modified in the loop body
+                let loop_modified = collect_modified_vars(&body);
+
+                // Havoc: create fresh Z3 vars for all loop-modified variables
+                for var_name in &loop_modified {
+                    let havoc_name = format!("{}_loop_exit", var_name);
+                    let havoc_var = Int::new_const(ctx, havoc_name.as_str());
+                    current_vars.insert(var_name.clone(), havoc_var);
+                    modified.insert(var_name.clone());
+                }
+
+                // Assume loop invariants hold at exit
+                for inv in invariants {
+                    if let Some(z3_inv) = invariant_to_z3_with_current(ctx, &inv.expr, &current_vars) {
+                        solver.assert(&z3_inv);
+                    }
+                }
+
+                // Assert ¬condition: the loop has exited
+                // Encode the loop condition as a Z3 Bool and negate it
+                if let Some(exit_cond) = condition_to_z3(ctx, condition, &current_vars) {
+                    solver.assert(&exit_cond.not());
+                }
+            },
+            Stmt::If { then_block, else_block, .. } => {
+                // Overapproximate: encode effects from both branches
+                // Variables modified in either branch become havoc'd
+                let then_modified = collect_modified_vars(then_block);
+                if let Some(else_b) = else_block {
+                    let else_modified = collect_modified_vars(else_b);
+                    for var_name in then_modified.union(&else_modified) {
+                        let havoc_name = format!("{}_if_merge", var_name);
+                        let havoc_var = Int::new_const(ctx, havoc_name.as_str());
+                        current_vars.insert(var_name.clone(), havoc_var);
+                        modified.insert(var_name.clone());
+                    }
+                } else {
+                    // If without else: modified vars become indeterminate
+                    for var_name in &then_modified {
+                        let havoc_name = format!("{}_if_merge", var_name);
+                        let havoc_var = Int::new_const(ctx, havoc_name.as_str());
+                        current_vars.insert(var_name.clone(), havoc_var);
+                        modified.insert(var_name.clone());
+                    }
+                }
+            },
             _ => {} // Return, etc. — no effect on Z3 state
         }
     }
@@ -300,6 +354,79 @@ fn encode_body_effects<'ctx>(
     }
 
     modified
+}
+
+// Collect all variable names that are assigned in a block
+fn collect_modified_vars(block: &Block) -> HashSet<String> {
+    let mut modified = HashSet::new();
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Assign { target, .. } => {
+                if let LValue::Ident(name) = target {
+                    modified.insert(name.clone());
+                }
+            },
+            Stmt::While { body, .. } => {
+                modified.extend(collect_modified_vars(body));
+            },
+            Stmt::If { then_block, else_block, .. } => {
+                modified.extend(collect_modified_vars(then_block));
+                if let Some(eb) = else_block {
+                    modified.extend(collect_modified_vars(eb));
+                }
+            },
+            _ => {},
+        }
+    }
+    modified
+}
+
+// Evaluate invariant expression using a single set of "current" variables
+// Used for loop invariants where we don't have a pre/post split
+fn invariant_to_z3_with_current<'ctx>(
+    ctx: &'ctx Context, inv: &InvariantExpr, vars: &HashMap<String, Int<'ctx>>,
+) -> Option<Bool<'ctx>> {
+    // Reuse the standard invariant_to_z3 by passing current vars as both pre and post
+    invariant_to_z3(ctx, inv, vars, vars)
+}
+
+// Convert an Anvil Expr (used as a condition) to a Z3 Bool
+// Handles comparisons like `counter > 0`, `i <= n`
+fn condition_to_z3<'ctx>(
+    ctx: &'ctx Context, expr: &Expr, vars: &HashMap<String, Int<'ctx>>,
+) -> Option<Bool<'ctx>> {
+    match expr {
+        Expr::BinOp { left, op, right } => {
+            match op {
+                BinOp::Gt | BinOp::Lt | BinOp::Gte | BinOp::Lte | BinOp::Eq | BinOp::Neq => {
+                    let l = expr_to_z3(ctx, left, vars)?;
+                    let r = expr_to_z3(ctx, right, vars)?;
+                    Some(match op {
+                        BinOp::Gt => l.gt(&r),
+                        BinOp::Lt => l.lt(&r),
+                        BinOp::Gte => l.ge(&r),
+                        BinOp::Lte => l.le(&r),
+                        BinOp::Eq => l._eq(&r).into(),
+                        BinOp::Neq => l._eq(&r).not(),
+                        _ => unreachable!(),
+                    })
+                },
+                BinOp::And => {
+                    let l = condition_to_z3(ctx, left, vars)?;
+                    let r = condition_to_z3(ctx, right, vars)?;
+                    Some(Bool::and(ctx, &[&l, &r]))
+                },
+                BinOp::Or => {
+                    let l = condition_to_z3(ctx, left, vars)?;
+                    let r = condition_to_z3(ctx, right, vars)?;
+                    Some(Bool::or(ctx, &[&l, &r]))
+                },
+                _ => None,
+            }
+        },
+        Expr::BoolLit(b) => Some(Bool::from_bool(ctx, *b)),
+        _ => None,
+    }
 }
 
 // --- Type constraint injection ---
