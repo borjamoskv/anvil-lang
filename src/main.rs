@@ -64,7 +64,7 @@ fn print_banner() {
     eprintln!();
     eprintln!("{}", "  ╔═══════════════════════════════════════════╗".bright_blue());
     eprintln!("{}", "  ║   ▄▀█ ███▄ █ █ █ █ █   █                 ║".bright_blue());
-    eprintln!("{}", "  ║   █▀█ █  ▀██ ▀▄▀ █ █▄▄ █▄▄    v0.1      ║".bright_blue());
+    eprintln!("{}", "  ║   █▀█ █  ▀██ ▀▄▀ █ █▄▄ █▄▄    v0.5      ║".bright_blue());
     eprintln!("{}", "  ║   Where trust doesn't compile.            ║".bright_blue());
     eprintln!("{}", "  ╚═══════════════════════════════════════════╝".bright_blue());
     eprintln!();

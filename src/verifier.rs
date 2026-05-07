@@ -602,10 +602,11 @@ pub fn print_results(results: &[VerifyResult]) {
         total += r.postconditions_count;
         if r.verified {
             passed += r.postconditions_count;
-            println!("  {} {} — {} preconditions, {} postconditions verified in {:.3}ms",
+            println!("  {} {} — {} preconditions, {} postconditions verified ({} invariants) in {:.3}ms",
                 "✓".bright_green().bold(),
                 r.fn_name.bright_white().bold(),
                 r.preconditions_count, r.postconditions_count,
+                r.invariants_checked,
                 r.duration_ms,
             );
         } else {

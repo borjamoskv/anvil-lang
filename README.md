@@ -83,13 +83,17 @@ anvil ast examples/transfer.anv
 | File | Description | Expected |
 |---|---|---|
 | `transfer.anv` | Token transfer with conservation law | ✅ PROVEN |
-| `vault.anv` | ERC-4626 deposit/withdraw | ✅/✅/❌ (broken withdraw caught) |
+| `vault.anv` | ERC-4626 deposit/withdraw with `&&`/`\|\|` | ✅/✅/❌ (broken withdraw caught) |
 | `reentrancy.anv` | The DAO hack pattern | ❌ REJECTED (counterexample shown) |
-| `overflow.anv` | Integer overflow attack | ❌ REJECTED by type constraints |
+| `overflow.anv` | Integer overflow attack | ✅ PROVEN with bounds |
+| `token.anv` | ERC-20 with contract-level invariant | ✅/✅/❌ (accounting equation violated) |
+| `ssa.anv` | Sequential assignments (SSA) | ✅/✅/✅/❌ (broken sequence caught) |
+| `loops.anv` | Mathematical proofs (3-way conservation) | ✅/✅/✅/❌/❌ |
+| `while_loops.anv` | While loops with inductive invariants | ✅/✅/❌ (broken countdown caught) |
 
 ## Status
 
-**v0.2 — Type Checker + Adversarial Suite**
+**v0.5 — Loops + Contracts + SSA**
 
 - [x] PEG Grammar (pest)
 - [x] Parser → AST
@@ -99,8 +103,12 @@ anvil ast examples/transfer.anv
 - [x] Rust Code Generation
 - [x] CLI (check / build / ast)
 - [x] **Adversarial test suite** (reentrancy, overflow, share inflation)
-- [ ] Loop invariant verification
-- [ ] Contract-level invariants
+- [x] **Logical operators** (`&&`, `||`) in invariant expressions
+- [x] **Contract-level invariants** (global accounting equations)
+- [x] **SSA body encoding** (sequential assignments)
+- [x] **While loop verification** (havoc-assume-exit pattern)
+- [x] **If-else handling** (branch overapproximation)
+- [x] **Loop exit conditions** (¬condition assertion)
 - [ ] LSP / Editor support
 - [ ] LLVM backend
 
