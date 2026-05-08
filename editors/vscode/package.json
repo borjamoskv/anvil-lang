@@ -1,0 +1,53 @@
+{
+  "name": "anvil-lang",
+  "displayName": "Anvil",
+  "description": "Where trust doesn't compile. Formal verification powered by Z3.",
+  "version": "0.1.0",
+  "publisher": "borjamoskv",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:anvil"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "anvil",
+        "aliases": [
+          "Anvil",
+          "anvil"
+        ],
+        "extensions": [
+          ".anv"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "anvil",
+        "scopeName": "source.anvil",
+        "path": "./syntaxes/anvil.tmLanguage.json"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.80.0",
+    "typescript": "^5.0.0"
+  }
+}

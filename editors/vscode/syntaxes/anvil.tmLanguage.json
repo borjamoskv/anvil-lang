@@ -1,0 +1,75 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Anvil",
+  "patterns": [
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#comments"
+    },
+    {
+      "include": "#types"
+    },
+    {
+      "include": "#invariants"
+    }
+  ],
+  "repository": {
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.anvil",
+          "match": "\\b(if|else|while|return|break|continue)\\b"
+        },
+        {
+          "name": "keyword.declaration.anvil",
+          "match": "\\b(fn|let|mut|const|struct|contract|pub|where)\\b"
+        }
+      ]
+    },
+    "types": {
+      "patterns": [
+        {
+          "name": "entity.name.type.anvil",
+          "match": "\\b(u8|u16|u32|u64|u128|u256|i8|i16|i32|i64|i128|bool|Address|String)\\b"
+        }
+      ]
+    },
+    "invariants": {
+      "patterns": [
+        {
+          "name": "keyword.operator.logical.anvil",
+          "match": "\\b(forall|exists)\\b"
+        },
+        {
+          "name": "variable.other.post.anvil",
+          "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*'\\b"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.anvil",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.anvil",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.anvil",
+          "match": "//.*$"
+        }
+      ]
+    }
+  },
+  "scopeName": "source.anvil"
+}
