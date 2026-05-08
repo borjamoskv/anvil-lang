@@ -1,5 +1,4 @@
-name: CI
-
+name: Rust CI
 
 on:
   push:
@@ -7,26 +6,53 @@ on:
   pull_request:
     branches: [ "main" ]
 
-
 env:
   CARGO_TERM_COLOR: always
 
-
 jobs:
-  build:
+  build_and_test:
+    name: Build & Verify
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install Z3
-        run: sudo apt-get install -y z3 libz3-dev clang llvm
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - name: Build
-        run: cargo build --verbose
-      - name: Clippy
-        run: cargo clippy 
-      - name: Run tests
-        run: cargo test --verbose
 
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Z3 Solver
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y z3 libz3-dev clang llvm
+        z3 --version
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: clippy, rustfmt
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Check Formatting
+      run: cargo fmt -- --check
+
+    - name: Lint (Clippy)
+      run: cargo clippy -- -D warnings
+
+    - name: Build
+      run: cargo build --verbose
+
+    - name: Run Tests
+      run: cargo test --verbose
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Autonomous Bug Bounty Scanner (C5-REAL)
+      run: python3 tools/bounty_scanner.py
+
+    - name: Proof Market Execution - AMM Audit
+      run: python3 tests/test_proof_market_amm.py
+
+    - name: End-to-End Proof Market Verification - Vault
+      run: python3 tests/test_proof_market.py
