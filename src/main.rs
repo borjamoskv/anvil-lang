@@ -7,6 +7,7 @@ mod parser;
 mod typechecker;
 mod verifier;
 mod codegen;
+mod lsp;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -46,9 +47,12 @@ enum Commands {
         /// Path to the .anv file
         file: PathBuf,
     },
+    /// Start the Anvil Language Server Protocol (LSP)
+    Lsp,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     print_banner();
@@ -57,6 +61,7 @@ fn main() {
         Commands::Check { file } => cmd_check(&file),
         Commands::Build { file, output } => cmd_build(&file, &output),
         Commands::Ast { file } => cmd_ast(&file),
+        Commands::Lsp => lsp::run_server().await,
     }
 }
 
