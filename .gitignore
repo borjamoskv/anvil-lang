@@ -17,3 +17,10 @@ tests/Exploit*.t.sol
 
 # CORTEX Immunefi Payload
 CORTEX_Immunefi_Payload.zip
+
+# Transient / Sandbox artifacts
+.rustup_temp/
+.venv_z3/
+tmp/
+audit/
+*.zip

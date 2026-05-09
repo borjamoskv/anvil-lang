@@ -65,3 +65,24 @@ fn withdraw_broken(total_supply: u64, total_assets: u64, shares: u64) -> u64
     total_assets -= shares;
     return total_assets;
 }
+
+// ============================================================
+// BROKEN: Direct donation + Share Inflation
+// This simulates a highly adversarial inflation vector where an
+// attacker manipulates total_assets directly, but fails to burn
+// shares properly, bypassing simple checks.
+// Anvil's global conservation invariant MUST reject this.
+// ============================================================
+
+fn donation_inflation(total_supply: u64, total_assets: u64, donation: u64, shares: u64) -> u64
+    where {
+        donation > 0 && shares > 0 && total_supply >= shares && total_assets + donation >= shares,
+        total_supply' == total_supply - shares,
+        total_assets' == total_assets + donation - shares
+    }
+{
+    // BUG: Inflation vector: supply is not decremented, assets reflect a donation and a withdraw
+    total_assets += donation;
+    total_assets -= shares;
+    return total_assets;
+}

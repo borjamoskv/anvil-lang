@@ -12,10 +12,11 @@
 // ============================================================
 
 use z3::ast::{Ast, Int, Bool};
-use z3::{Config, Context, SatResult, Solver};
+use z3::{Config, Context, SatResult, Solver, Tactic};
 use crate::ast::*;
 use crate::typechecker::{TypeEnv, ConstraintKind};
 use colored::Colorize;
+use sha3::{Digest, Sha3_256};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
@@ -28,6 +29,8 @@ pub struct VerifyResult {
     pub verified: bool,
     pub counterexample: Option<String>,
     pub duration_ms: f64,
+    /// SHA3-256 of the solver assertion set — cryptographic anchor for CORTEX provenance.
+    pub proof_hash: String,
 }
 
 pub fn verify_program(program: &Program, type_env: &TypeEnv) -> Vec<VerifyResult> {
@@ -51,9 +54,13 @@ pub fn verify_program(program: &Program, type_env: &TypeEnv) -> Vec<VerifyResult
 
 fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Invariant]) -> VerifyResult {
     let start = Instant::now();
-    let cfg = Config::new();
+    let mut cfg = Config::new();
+    cfg.set_param_value("timeout", "5000"); // Dynamic timeout (5000ms) for division/rounding bounds
     let ctx = Context::new(&cfg);
-    let solver = Solver::new(&ctx);
+    
+    // Tactic 'smt' configured to optimize and handle general solver operations robustly
+    let tactic = Tactic::new(&ctx, "smt");
+    let solver = tactic.solver();
 
     // Create pre/post Z3 variables for all params
     let mut pre_vars: HashMap<String, Int> = HashMap::new();
@@ -113,10 +120,74 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
         }
     }
 
-    // Step 4: Verify function postconditions
+    // Define verification state
     let mut all_verified = true;
     let mut counterexample = None;
-    let total_postconditions = postconditions.len() + contract_invariants.len();
+    let mut global_invariants_checked = 0;
+
+    // Step 3.5: Global Conservation & Inflation Defense
+    if let (Some(pre_assets), Some(pre_supply), Some(post_assets), Some(post_supply)) = (
+        pre_vars.get("total_assets"),
+        pre_vars.get("total_supply"),
+        post_vars.get("total_assets"),
+        post_vars.get("total_supply"),
+    ) {
+        global_invariants_checked += 2;
+
+        // 1. Share Inflation Defense: if assets decreased, supply MUST have decreased
+        solver.push();
+        let assets_decreased = post_assets.lt(pre_assets);
+        let supply_decreased = post_supply.lt(pre_supply);
+        let inflation_defense = assets_decreased.implies(&supply_decreased);
+        solver.assert(&inflation_defense.not());
+        
+        if let SatResult::Sat = solver.check() {
+            all_verified = false;
+            let mut ce = String::from("GLOBAL INVARIANT VIOLATED: Share Inflation detected! (Assets decreased but Supply did not)\n");
+            let model = solver.get_model().unwrap();
+            for (name, var) in &pre_vars {
+                if let Some(val) = model.eval(var, true) {
+                    ce.push_str(&format!("  {} = {}\n", name, val));
+                }
+            }
+            for (name, var) in &post_vars {
+                if let Some(val) = model.eval(var, true) {
+                    ce.push_str(&format!("  {}' = {}\n", name, val));
+                }
+            }
+            if counterexample.is_none() { counterexample = Some(ce); }
+        }
+        solver.pop(1);
+
+        // 2. Conservation Ratio: pre_solvent => post_solvent
+        solver.push();
+        let pre_solvent = pre_assets.ge(pre_supply);
+        let post_solvent = post_assets.ge(post_supply);
+        let conservation = pre_solvent.implies(&post_solvent);
+        solver.assert(&conservation.not());
+
+        if let SatResult::Sat = solver.check() {
+            all_verified = false;
+            let mut ce = String::from("GLOBAL INVARIANT VIOLATED: Conservation ratio compromised! (Protocol became undercollateralized)\n");
+            let model = solver.get_model().unwrap();
+            for (name, var) in &pre_vars {
+                if let Some(val) = model.eval(var, true) {
+                    ce.push_str(&format!("  {} = {}\n", name, val));
+                }
+            }
+            for (name, var) in &post_vars {
+                if let Some(val) = model.eval(var, true) {
+                    ce.push_str(&format!("  {}' = {}\n", name, val));
+                }
+            }
+            if counterexample.is_none() { counterexample = Some(ce); }
+        }
+        solver.pop(1);
+    }
+
+    let total_postconditions = postconditions.len() + contract_invariants.len() + global_invariants_checked;
+
+    // Step 4: Verify function postconditions
 
     for (i, post_inv) in postconditions.iter().enumerate() {
         solver.push();
@@ -187,6 +258,18 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
         solver.pop(1);
     }
 
+    // Compute proof hash: SHA3-256 over the solver's assertion set.
+    // This is the cryptographic anchor that CORTEX-Persist uses to link
+    // a persisted fact back to the Z3 proof that justified it.
+    let proof_hash = {
+        let assertions = solver.get_assertions();
+        let mut hasher = Sha3_256::new();
+        for assertion in assertions.iter() {
+            hasher.update(format!("{}", assertion).as_bytes());
+        }
+        hex::encode(hasher.finalize())
+    };
+
     VerifyResult {
         fn_name: func.name.clone(),
         invariants_checked: func.invariants.len() + contract_invariants.len(),
@@ -195,6 +278,7 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
         verified: all_verified,
         counterexample,
         duration_ms: start.elapsed().as_secs_f64() * 1000.0,
+        proof_hash,
     }
 }
 
