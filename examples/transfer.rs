@@ -7,7 +7,7 @@
 /// #3: (sender_balance' + receiver_balance') = (sender_balance + receiver_balance)
 /// #4: sender_balance' = (sender_balance - amount)
 /// #5: receiver_balance' = (receiver_balance + amount)
-fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64 {
+fn transfer(mut sender_balance: u64, mut receiver_balance: u64, amount: u64) -> u64 {
     sender_balance -= amount;
     receiver_balance += amount;
     return sender_balance;
@@ -20,8 +20,7 @@ fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64 {
 /// #4: debt > 0
 /// #5: total_repaid' ≤ ((debt × close_factor) ÷ 100)
 /// #6: repay_amount ≤ (((debt × close_factor) ÷ 100) - total_repaid)
-fn liquidate(debt: u64, repay_amount: u64, close_factor: u64, total_repaid: u64) -> u64 {
+fn liquidate(_debt: u64, repay_amount: u64, _close_factor: u64, mut total_repaid: u64) -> u64 {
     total_repaid += repay_amount;
     return total_repaid;
 }
-
