@@ -706,6 +706,11 @@ pub fn print_results(results: &[VerifyResult]) {
                 r.invariants_checked,
                 r.duration_ms,
             );
+            println!("    {} proof: {}…{}",
+                "🔐",
+                &r.proof_hash[..16],
+                &r.proof_hash[r.proof_hash.len()-8..],
+            );
         } else {
             println!("  {} {} — VERIFICATION FAILED",
                 "✗".bright_red().bold(),

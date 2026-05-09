@@ -195,6 +195,62 @@ fn cmd_build(file: &PathBuf, output: &PathBuf, target: &str) {
             Err(e) => eprintln!("  {} Cannot write {}: {}", "✗".bright_red(), out_path.display(), e),
         }
     }
+
+    // ── CORTEX Provenance Manifest ───────────────────────────────────
+    // Emits a JSON manifest that cortex-persist's anvil_bridge.py can
+    // ingest to create AnvilVerifiedExecution facts in the Ledger.
+    emit_cortex_manifest(file, output, &results);
+}
+
+/// Emit a CORTEX provenance manifest alongside the compiled output.
+///
+/// The manifest contains proof_hash, invariant counts, and verification
+/// metadata for every verified function. This is the bridge artifact that
+/// `cortex-persist/cortex/engine/anvil_bridge.py` consumes.
+fn emit_cortex_manifest(
+    source_file: &PathBuf,
+    output: &PathBuf,
+    results: &[verifier::VerifyResult],
+) {
+    let manifest_path = output.with_extension("cortex_manifest.json");
+
+    let functions: Vec<serde_json::Value> = results.iter().map(|r| {
+        serde_json::json!({
+            "fn_name": r.fn_name,
+            "verified": r.verified,
+            "proof_hash": r.proof_hash,
+            "invariants_checked": r.invariants_checked,
+            "preconditions_count": r.preconditions_count,
+            "postconditions_count": r.postconditions_count,
+            "duration_ms": r.duration_ms,
+        })
+    }).collect();
+
+    let manifest = serde_json::json!({
+        "schema_version": "1.0",
+        "anvil_version": env!("CARGO_PKG_VERSION"),
+        "source_file": source_file.to_string_lossy(),
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "verifier": "anvil-z3",
+        "fact_type": "anvil_verified_execution",
+        "functions": functions,
+        "total_proven": results.iter().filter(|r| r.verified).count(),
+        "total_failed": results.iter().filter(|r| !r.verified).count(),
+    });
+
+    match std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap()) {
+        Ok(_) => {
+            eprintln!("  {} CORTEX manifest: {} ({} proofs)",
+                "🔐".to_string().as_str(),
+                manifest_path.display(),
+                results.len(),
+            );
+        }
+        Err(e) => {
+            eprintln!("  {} Cannot write manifest {}: {}",
+                "⚠".bright_yellow(), manifest_path.display(), e);
+        }
+    }
 }
 
 fn cmd_ast(file: &PathBuf) {
