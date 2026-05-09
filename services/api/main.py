@@ -91,5 +91,5 @@ class ProofMarketHandler(http.server.SimpleHTTPRequestHandler):
 
 print(f"Anvil Proof Market Oracle booting on port {PORT}...")
 print("Zero dependencies loaded. Pure thermodynamic socket.")
-with socketserver.TCPServer(("", PORT), ProofMarketHandler) as httpd:
+with socketserver.TCPServer(("127.0.0.1", PORT), ProofMarketHandler) as httpd:
     httpd.serve_forever()

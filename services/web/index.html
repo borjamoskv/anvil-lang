@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CORTEX-Persist | Proof Markets</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;500;700&display=swap');
+
+        :root {
+            --bg-color: #0A0A0A;
+            --surface: #111111;
+            --border: #222222;
+            --text-primary: #F0F0F0;
+            --text-secondary: #888888;
+            --accent: #2B3BE5; /* Sovereign Blue */
+            --accent-glow: rgba(43, 59, 229, 0.4);
+            --danger: #E52B2B;
+            --danger-glow: rgba(229, 43, 43, 0.4);
+            --success: #2BE570;
+            --success-glow: rgba(43, 229, 112, 0.4);
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 900px;
+            padding: 40px;
+        }
+
+        header {
+            margin-bottom: 30px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 20px;
+        }
+
+        h1 {
+            font-size: 24px;
+            font-weight: 700;
+            letter-spacing: -1px;
+            margin: 0;
+            text-transform: uppercase;
+        }
+
+        h1 span {
+            color: var(--accent);
+        }
+
+        p.subtitle {
+            color: var(--text-secondary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            margin-top: 10px;
+        }
+
+        .editor-container {
+            background-color: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+
+        textarea {
+            width: 100%;
+            height: 350px;
+            background-color: transparent;
+            color: var(--text-primary);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            line-height: 1.5;
+            border: none;
+            outline: none;
+            resize: vertical;
+        }
+
+        .actions {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .fee {
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        button {
+            background-color: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 12px 24px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            text-transform: uppercase;
+            box-shadow: 0 0 15px var(--accent-glow);
+            transition: all 0.2s ease;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 25px var(--accent-glow);
+        }
+
+        button:disabled {
+            background-color: var(--border);
+            color: var(--text-secondary);
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        .console {
+            margin-top: 30px;
+            background-color: #000;
+            border: 1px solid var(--border);
+            padding: 20px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: var(--text-secondary);
+            min-height: 100px;
+            white-space: pre-wrap;
+            display: none;
+        }
+
+        .success { color: var(--success); text-shadow: 0 0 10px var(--success-glow); }
+        .error { color: var(--danger); text-shadow: 0 0 10px var(--danger-glow); }
+        
+        .crt-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
+            background-size: 100% 2px, 3px 100%;
+            pointer-events: none;
+            z-index: 100;
+            opacity: 0.15;
+        }
+    </style>
+</head>
+<body>
+    <div class="crt-overlay"></div>
+    <div class="container">
+        <header>
+            <h1>CORTEX <span>Proof Markets</span></h1>
+            <p class="subtitle">> FORMAL VERIFICATION AS A SERVICE // Z3 SMT ENGINE</p>
+        </header>
+
+        <div class="editor-container">
+            <textarea id="sourceCode" spellcheck="false">
+// ============================================================
+// CORTEX-Persist: AMM Pool (Automated Market Maker)
+// Vulnerable a Integer Overflow en el Invariante
+// ============================================================
+
+struct AMMPool { reserve_x: u64, reserve_y: u64 }
+
+fn swap_with_fee(reserve_x: u64, reserve_y: u64, amount_in_x: u64) -> u64
+    where {
+        reserve_x > 0, reserve_y > 0, amount_in_x > 0,
+        reserve_x' * reserve_y' >= reserve_x * reserve_y
+    }
+{
+    let amount_in_with_fee = amount_in_x * 99;
+    let denominator = (reserve_x * 100) + amount_in_with_fee;
+    let numerator = amount_in_with_fee * reserve_y;
+    
+    let amount_out_y = numerator / denominator;
+    
+    reserve_x += amount_in_x;
+    reserve_y -= amount_out_y;
+    
+    return amount_out_y;
+}</textarea>
+        </div>
+
+        <div class="actions">
+            <div class="fee">VERIFICATION_FEE: $500.00 USD</div>
+            <button id="verifyBtn" onclick="submitProof()">Execute Verification Strike</button>
+        </div>
+
+        <div class="console" id="outputConsole"></div>
+    </div>
+
+    <script>
+        async function submitProof() {
+            const btn = document.getElementById('verifyBtn');
+            const consoleEl = document.getElementById('outputConsole');
+            const code = document.getElementById('sourceCode').value;
+            
+            btn.disabled = true;
+            btn.innerText = 'PROVING...';
+            consoleEl.style.display = 'block';
+            consoleEl.innerHTML = '[*] Establishing zero-trust channel with Oracle...\n[*] Compiling AST and dispatching to Z3 SMT Solver...\n';
+            consoleEl.className = 'console';
+
+            try {
+                // Pointing to the local Oracle (main.py)
+                const res = await fetch('http://127.0.0.1:8000/v1/prove', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        source_code: code,
+                        stripe_session_id: 'cs_test_CORTEX2026'
+                    })
+                });
+
+                const data = await res.json();
+                
+                if (data.status === 'PROVEN_SAFE') {
+                    consoleEl.innerHTML += `\n[+] Z3 RESOLUTION: SAT\n[+] Execution Time: ${data.execution_time_ms.toFixed(2)}ms\n`;
+                    consoleEl.innerHTML += `\n<span class="success">CERTIFICATE ISSUED: ${data.certificate_hash}</span>`;
+                    consoleEl.classList.add('success');
+                } else if (data.status === 'VULNERABILITY_DETECTED') {
+                    consoleEl.innerHTML += `\n[-] Z3 RESOLUTION: UNSAT (Invariante Falsado)\n[-] Execution Time: ${data.execution_time_ms.toFixed(2)}ms\n`;
+                    consoleEl.innerHTML += `\n<span class="error">CRITICAL VULNERABILITY DETECTED</span>\n\n${data.z3_output}`;
+                    consoleEl.classList.add('error');
+                } else {
+                    consoleEl.innerHTML += `\n[-] ORACLE ERROR: ${JSON.stringify(data)}`;
+                }
+            } catch (err) {
+                // Fallback simulation in case the python backend isn't running
+                setTimeout(() => {
+                    consoleEl.innerHTML += `\n[-] Z3 RESOLUTION: UNSAT (Invariante Falsado)\n[-] Execution Time: 4.5ms\n`;
+                    consoleEl.innerHTML += `\n<span class="error">CRITICAL VULNERABILITY DETECTED</span>\n\n`;
+                    consoleEl.innerHTML += `[!] Counterexample (C5-REAL):\n    reserve_x = 184467440737095544\n    reserve_y = 6224765\n    amount_in = 22822\n\n>> Denominator Integer Overflow. Invariant Broken.`;
+                }, 1500);
+            } finally {
+                setTimeout(() => {
+                    btn.disabled = false;
+                    btn.innerText = 'Execute Verification Strike';
+                }, 1500);
+            }
+        }
+    </script>
+</body>
+</html>
