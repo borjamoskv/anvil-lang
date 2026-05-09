@@ -3,6 +3,8 @@
 // Event Horizon P0 - "El software es una abstracción temporal."
 // ============================================================
 
+#![allow(dead_code)]
+
 use tracing::{info, warn};
 use std::time::Instant;
 
@@ -21,7 +23,7 @@ impl Default for TensorSMTEngine {
 impl TensorSMTEngine {
     /// Intercepta el árbol DPLL(T) de Z3 y utiliza heurísticas tensoriales
     /// para reducir el espacio de estado (NP-Hard).
-    pub fn guide_smt_search(&self, solver_context: &str) -> Result<(), String> {
+    pub fn guide_smt_search(&self, _solver_context: &str) -> Result<(), String> {
         info!("Singularity [1/4]: Inicializando Tensor-SMT para bypass de explosión de estado Z3.");
         // TODO: Inject ONNX Runtime para inferencia del modelo heurístico.
         Ok(())
@@ -43,7 +45,7 @@ impl Default for DirectSiliconCompiler {
 impl DirectSiliconCompiler {
     /// Aniquila la capa LLVM/Von Neumann. Compila invariantes
     /// directamente a RTL/Verilog.
-    pub fn compile_to_bitstream(&self, ast: &crate::ast::Program) -> Result<Vec<u8>, String> {
+    pub fn compile_to_bitstream(&self, _ast: &crate::ast::Program) -> Result<Vec<u8>, String> {
         warn!("Singularity [2/4]: LLVM Bypassed. Iniciando síntesis de hardware directo para {}.", self.target_fabric);
         // TODO: Sintetizar AST a primitivas RTL.
         Ok(vec![0x00, 0x01, 0x02, 0x03]) // Dummy bitstream
@@ -55,8 +57,8 @@ pub struct DynamicInvariantGenerator;
 
 impl DynamicInvariantGenerator {
     /// Lee EVM Bytecode y deduce invariantes ocultos no declarados.
-    pub fn deduce_latent_invariants(evm_bytecode: &[u8]) -> Vec<crate::ast::Invariant> {
-        info!("Singularity [3/4]: Analizando EVM bytecode ({} bytes) para deducir invariantes metacognitivos.", evm_bytecode.len());
+    pub fn deduce_latent_invariants(_evm_bytecode: &[u8]) -> Vec<crate::ast::Invariant> {
+        info!("Singularity [3/4]: Analizando EVM bytecode ({} bytes) para deducir invariantes metacognitivos.", _evm_bytecode.len());
         // TODO: Algoritmo Genético sobre EVM OpCodes.
         vec![]
     }
