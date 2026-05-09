@@ -1,0 +1,22 @@
+fn swap_x_for_y(active_bin_id: u64, x_balance: u64, amount_in: u64) -> u64
+    where {
+        // If we move the bin, we MUST have consumed some amount_in
+        active_bin_id' != active_bin_id || amount_in > 0,
+        
+        // This is the invariant we want to prove:
+        // "Moving the bin requires spending capital"
+        active_bin_id' == active_bin_id || amount_in > 0
+    }
+{
+    // BitFlow logic (vulnerable part)
+    if (x_balance == 0) {
+        // Empty bin: BitFlow moves the bin ID even if amount_in is minimal
+        active_bin_id = active_bin_id - 1;
+        // In the real code, it updates the state here without checking amount_in > 0
+    } else {
+        // Non-empty bin: normal swap
+        active_bin_id = active_bin_id;
+    }
+    
+    return active_bin_id;
+}
