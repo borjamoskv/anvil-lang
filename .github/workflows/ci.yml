@@ -58,3 +58,25 @@ jobs:
 
     - name: Integration Test - AMM Vulnerability Market
       run: python3 tests/test_proof_market_amm.py
+
+    - name: Generate CORTEX Provenance Manifests
+      run: |
+        echo "  → Generating CORTEX provenance manifests for example programs..."
+        mkdir -p artifacts/cortex
+        for anv_file in examples/*.anv; do
+          if [ -f "$anv_file" ]; then
+            echo "  → Building $anv_file with provenance..."
+            ./target/debug/anvil build "$anv_file" -o "artifacts/cortex/$(basename "$anv_file" .anv)" || true
+          fi
+        done
+        echo "  ✓ Manifests generated:"
+        ls -la artifacts/cortex/*.cortex_manifest.json 2>/dev/null || echo "  (no .anv examples found)"
+
+    - name: Upload CORTEX Provenance Artifacts
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: cortex-provenance-manifests
+        path: artifacts/cortex/*.cortex_manifest.json
+        if-no-files-found: ignore
+        retention-days: 90
