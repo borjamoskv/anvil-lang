@@ -13,3 +13,7 @@ target*.anv
 docs/c5_real_audit_*.md
 # Tests containing actual zero-days
 tests/Exploit*.t.sol
+
+
+# CORTEX Immunefi Payload
+CORTEX_Immunefi_Payload.zip
