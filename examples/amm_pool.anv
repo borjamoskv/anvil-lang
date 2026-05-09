@@ -1,0 +1,28 @@
+// ============================================================
+// CORTEX-Persist: AMM Pool (Automated Market Maker)
+// 
+// La Traducción Geométrica (Uniswap V2)
+// Despojado de msg.sender, EVM, gas. Esqueleto matemático: x * y = k.
+// ============================================================
+
+struct AMMPool {
+    reserve_x: u64,
+    reserve_y: u64
+}
+
+// Función de swap pura, la solvencia garantizada por el Solver Z3
+fn swap(reserve_x: u64, reserve_y: u64, amount_in_x: u64, amount_out_y: u64) -> u64
+    where {
+        reserve_x > 0,
+        reserve_y > 0,
+        amount_in_x > 0,
+        // Ley inquebrantable: La reserva total nunca puede decrecer tras el intercambio
+        reserve_x' * reserve_y' >= reserve_x * reserve_y
+    }
+{
+    reserve_x += amount_in_x;
+    reserve_y -= amount_out_y;
+    
+    return amount_out_y;
+}
+
