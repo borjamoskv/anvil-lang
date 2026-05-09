@@ -60,9 +60,15 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
     cfg.set_param_value("timeout", "5000"); // Dynamic timeout (5000ms) for division/rounding bounds
     let ctx = Context::new(&cfg);
     
+    // Singularity [1/4]: Tensor-SMT Bypass Hook
+    let _ = crate::singularity::TensorSMTEngine::default().guide_smt_search("verify_function_ctx");
+
     // Tactic 'smt' configured to optimize and handle general solver operations robustly
     let tactic = Tactic::new(&ctx, "smt");
     let solver = tactic.solver();
+
+    // Singularity [4/4]: Inyectar topología de Mempool en la verificación matemática
+    crate::singularity::MempoolAwareZ3::inject_mempool_topology(&solver, &ctx);
 
     // Create pre/post Z3 variables for all params
     let mut pre_vars: HashMap<String, Int> = HashMap::new();

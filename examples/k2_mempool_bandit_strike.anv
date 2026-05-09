@@ -1,0 +1,45 @@
+// ============================================================
+// ANVIL FORENSIC HARNESS — K2 Lending Mempool Strike
+// Vulnerability: Close Factor Bypass + MEV Frontrunning
+// Engine: Singularity v0.6.0 (Mempool-Aware Z3)
+// ============================================================
+
+fn mev_close_factor_drain(
+    debt: u256,
+    close_factor: u256,
+    mempool_tx_order: u256, // Inyectado por Singularity [4/4]
+    victim_tx_order: u256,
+    attacker_first_call: u256,
+    attacker_second_call: u256,
+    total_liquidated: u256
+) -> u256
+where {
+    // 1. Estado Base
+    debt > 0,
+    close_factor == 5000,           // 50% max close factor
+    attacker_first_call > 0,
+    attacker_second_call > 0,
+
+    // 2. MEV Topology (Time-Bandit Attack)
+    // El atacante ve la tx de la víctima en el mempool y asegura el orden
+    mempool_tx_order < victim_tx_order,
+
+    // 3. Primer ataque (Frontrun): Liquidación permitida contra deuda total
+    attacker_first_call <= debt * close_factor / 10000,
+
+    // 4. Víctima intenta operar, pero el contrato ya está mutilado
+    // (Simulación del estado intermedio)
+    
+    // 5. Segundo ataque (Consecutivo en mismo bloque o mempool manipulado):
+    // El bypass radica en usar la deuda residual sin resetear el ratio
+    attacker_second_call <= (debt - attacker_first_call) * close_factor / 10000,
+
+    // POSTCONDITION (Mempool Strike):
+    // Z3 probará que el atacante (usando MEV y bypass) puede liquidar > 50% 
+    // antes de que la víctima ejecute su TX.
+    total_liquidated' <= debt * close_factor / 10000
+} {
+    total_liquidated += attacker_first_call;
+    total_liquidated += attacker_second_call;
+    return total_liquidated;
+}

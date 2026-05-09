@@ -10,6 +10,7 @@ mod codegen;
 mod lsp;
 mod llvm_ir;
 mod saas;
+mod singularity;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -48,6 +49,13 @@ enum Commands {
         #[arg(short, long, default_value = "rust")]
         target: String,
     },
+    /// Compile an Anvil file to Rust
+    Compile {
+        /// Path to the .anv file
+        file: PathBuf,
+    },
+    /// Initiate the Singularity Engine (UltraThink Mode)
+    Singularity,
     /// Parse and dump the AST as JSON
     Ast {
         /// Path to the .anv file
@@ -81,6 +89,8 @@ async fn main() {
     match cli.command {
         Commands::Check { file } => cmd_check(&file),
         Commands::Build { file, output, target } => cmd_build(&file, &output, &target),
+        Commands::Compile { file } => info!("Iniciando pase de compilación a Rust para: {:?}", file),
+        Commands::Singularity => singularity::initiate_engine(),
         Commands::Ast { file } => cmd_ast(&file),
         Commands::Lsp => lsp::run_server().await,
         Commands::Saas { port } => saas::start_server(port).await,
