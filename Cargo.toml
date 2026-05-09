@@ -1,10 +1,15 @@
 [package]
 name = "anvil"
-version = "0.5.1"
+version = "0.6.0"
 edition = "2024"
+rust-version = "1.85"
 description = "Anvil — A programming language where trust doesn't compile."
 license = "MIT"
 authors = ["BorjaMoskv <borja@moskv.dev>"]
+repository = "https://github.com/borjamoskv/anvil-lang"
+homepage = "https://github.com/borjamoskv/anvil-lang"
+keywords = ["formal-verification", "smart-contracts", "z3", "smt"]
+categories = ["compilers", "development-tools"]
 
 [[bin]]
 name = "anvil"
@@ -42,3 +47,9 @@ sha2 = "0.10"
 sha3 = "0.10"
 hex = "0.4"
 chrono = "0.4"
+
+# Observability
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"

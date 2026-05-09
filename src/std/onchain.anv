@@ -1,0 +1,127 @@
+// ============================================================
+// ANVIL STANDARD LIBRARY — anvil::onchain
+// Native On-Chain Primitives with Formal Verification
+// "Dinero = Energía = Información" (Ω₈)
+//
+// These types are NOT external SDKs. They are fundamental
+// language primitives compiled directly to silicon/opcodes.
+// ============================================================
+
+contract OnChain {
+    // --------------------------------------------------------
+    // NATIVE TRANSFER (Atomic Value Movement)
+    // --------------------------------------------------------
+    
+    fn transfer(from: Wallet, to: Wallet, from_balance: u256, to_balance: u256, amount: u256) -> u256
+    assumes {
+        // Environment axiom: both wallets exist and are distinct
+        from != to
+    }
+    where {
+        // Preconditions
+        amount > 0,
+        from_balance >= amount,
+        
+        // Conservation law: total value is preserved (thermodynamic invariant)
+        from_balance' + to_balance' == from_balance + to_balance,
+        
+        // Post-state correctness
+        from_balance' == from_balance - amount,
+        to_balance' == to_balance + amount
+    } {
+        from_balance -= amount;
+        to_balance += amount;
+        emit Transfer(from, to, amount);
+        return from_balance;
+    }
+
+    // --------------------------------------------------------
+    // SIGNATURE VERIFICATION
+    // --------------------------------------------------------
+    
+    fn verify_and_execute(
+        msg_hash: TxHash,
+        expected_signer: Wallet,
+        amount: u256,
+        balance: u256
+    ) -> u256
+    assumes {
+        // Trust that the signature was verified by the runtime
+        expected_signer > 0
+    }
+    where {
+        amount > 0,
+        balance >= amount,
+        balance' == balance - amount
+    } {
+        balance -= amount;
+        emit Execution(expected_signer, amount);
+        return balance;
+    }
+
+    // --------------------------------------------------------
+    // GAS-BOUNDED EXECUTION
+    // --------------------------------------------------------
+    
+    fn gas_bounded_swap(
+        reserve_x: u256,
+        reserve_y: u256,
+        amount_in: u256,
+        gas_limit: Gas
+    ) -> u256
+    where {
+        // AMM constant product invariant
+        amount_in > 0,
+        reserve_x > 0,
+        reserve_y > 0,
+        
+        // K-invariant: product must not decrease
+        reserve_x' * reserve_y' >= reserve_x * reserve_y,
+        
+        // Gas must be consumed but not exceeded
+        gas_limit > 0
+    } {
+        // Ghost variable: track the K-invariant for proof
+        ghost k_before: u256 = reserve_x * reserve_y;
+        
+        reserve_x += amount_in;
+        
+        // Simplified AMM output (real impl would use proper formula)
+        let amount_out: u256 = amount_in * reserve_y / reserve_x;
+        reserve_y -= amount_out;
+        
+        emit Swap(amount_in, amount_out);
+        return amount_out;
+    }
+
+    // --------------------------------------------------------
+    // MULTI-SIG THRESHOLD
+    // --------------------------------------------------------
+    
+    fn multi_sig_approve(
+        signers_count: u64,
+        threshold: u64,
+        approvals: u64,
+        amount: u256,
+        treasury: u256
+    ) -> u256
+    where {
+        // Threshold must be valid
+        threshold > 0,
+        threshold <= signers_count,
+        
+        // Enough approvals
+        approvals >= threshold,
+        
+        // Treasury has funds
+        treasury >= amount,
+        amount > 0,
+        
+        // Post: treasury decremented
+        treasury' == treasury - amount
+    } {
+        treasury -= amount;
+        emit MultiSigExecution(approvals, amount);
+        return treasury;
+    }
+}

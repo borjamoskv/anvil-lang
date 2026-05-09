@@ -23,6 +23,7 @@ pub fn parse_program(source: &str) -> Result<Program, String> {
                 Rule::struct_def => items.push(Item::Struct(parse_struct_def(inner)?)),
                 Rule::const_def => items.push(Item::Const(parse_const_def(inner)?)),
                 Rule::contract_def => items.push(Item::Contract(parse_contract_def(inner)?)),
+                Rule::ghost_var => items.push(Item::GhostVar(parse_ghost_var_def(inner)?)),
                 Rule::EOI => {},
                 _ => {},
             }
@@ -38,6 +39,7 @@ fn parse_fn_def(pair: pest::iterators::Pair<Rule>) -> Result<FnDef, String> {
     let mut params = Vec::new();
     let mut return_type = None;
     let mut invariants = Vec::new();
+    let mut assumes = Vec::new();
     let mut body = Block { stmts: vec![], expr: None };
 
     for inner in pair.into_inner() {
@@ -46,13 +48,14 @@ fn parse_fn_def(pair: pest::iterators::Pair<Rule>) -> Result<FnDef, String> {
             Rule::ident => name = inner.as_str().to_string(),
             Rule::param_list => params = parse_param_list(inner)?,
             Rule::type_expr => return_type = Some(parse_type(inner)?),
+            Rule::assumes_clause => assumes = parse_assumes_clause(inner)?,
             Rule::where_clause => invariants = parse_where_clause(inner)?,
             Rule::block => body = parse_block(inner)?,
             _ => {},
         }
     }
 
-    Ok(FnDef { name, is_pub, params, return_type, invariants, body, span: None })
+    Ok(FnDef { name, is_pub, params, return_type, invariants, assumes, body, span: None })
 }
 
 fn parse_param_list(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Param>, String> {
@@ -95,6 +98,8 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type, String> {
                 "i64" => Type::I64, "i128" => Type::I128,
                 "bool" => Type::Bool, "Address" => Type::Address,
                 "String" => Type::String, "Unit" => Type::Unit,
+                "Wallet" => Type::Wallet, "Signature" => Type::Signature,
+                "TxHash" => Type::TxHash, "Gas" => Type::Gas,
                 other => Type::Named(other.to_string()),
             })
         },
@@ -115,6 +120,33 @@ fn parse_where_clause(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Invariant
         }
     }
     Ok(invariants)
+}
+
+/// Parse assumes clause — environment axioms the verifier trusts without proving
+fn parse_assumes_clause(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Invariant>, String> {
+    let mut invariants = Vec::new();
+    for inner in pair.into_inner() {
+        if inner.as_rule() == Rule::invariant {
+            invariants.push(parse_invariant(inner)?);
+        }
+    }
+    Ok(invariants)
+}
+
+/// Parse a top-level ghost variable definition
+fn parse_ghost_var_def(pair: pest::iterators::Pair<Rule>) -> Result<GhostVarDef, String> {
+    let mut name = String::new();
+    let mut ty = Type::Unit;
+    let mut value = Expr::IntLit(0);
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::ident => name = inner.as_str().to_string(),
+            Rule::type_expr => ty = parse_type(inner)?,
+            Rule::expr => value = parse_expr(inner)?,
+            _ => {},
+        }
+    }
+    Ok(GhostVarDef { name, ty, value, span: None })
 }
 
 fn parse_invariant(pair: pest::iterators::Pair<Rule>) -> Result<Invariant, String> {
@@ -315,6 +347,8 @@ fn parse_block(pair: pest::iterators::Pair<Rule>) -> Result<Block, String> {
             Rule::assert_stmt => stmts.push(parse_assert_stmt(inner)?),
             Rule::while_stmt => stmts.push(parse_while_stmt(inner)?),
             Rule::if_stmt => stmts.push(parse_if_stmt(inner)?),
+            Rule::emit_stmt => stmts.push(parse_emit_stmt(inner)?),
+            Rule::ghost_stmt => stmts.push(parse_ghost_stmt(inner)?),
             Rule::expr_stmt => {
                 let expr_inner = inner.into_inner().next().unwrap();
                 stmts.push(Stmt::Expr(parse_expr(expr_inner)?));
@@ -377,6 +411,45 @@ fn parse_assert_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> 
     let condition = parse_expr(inners.next().unwrap())?;
     let message = inners.next().map(|p| p.as_str().trim_matches('"').to_string());
     Ok(Stmt::Assert { condition, message })
+}
+
+/// Parse emit statement — on-chain event emission
+fn parse_emit_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
+    let mut inners = pair.into_inner();
+    let event = inners.next().unwrap().as_str().to_string();
+    let mut args = Vec::new();
+    for inner in inners {
+        match inner.as_rule() {
+            Rule::arg_list => {
+                for arg in inner.into_inner() {
+                    if arg.as_rule() == Rule::expr {
+                        args.push(parse_expr(arg)?);
+                    }
+                }
+            },
+            Rule::expr => {
+                args.push(parse_expr(inner)?);
+            },
+            _ => {},
+        }
+    }
+    Ok(Stmt::Emit { event, args })
+}
+
+/// Parse ghost statement — proof-only variable binding, stripped from codegen
+fn parse_ghost_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
+    let mut name = String::new();
+    let mut ty = Type::Unit;
+    let mut value = Expr::IntLit(0);
+    for inner in pair.into_inner() {
+        match inner.as_rule() {
+            Rule::ident => name = inner.as_str().to_string(),
+            Rule::type_expr => ty = parse_type(inner)?,
+            Rule::expr => value = parse_expr(inner)?,
+            _ => {},
+        }
+    }
+    Ok(Stmt::Ghost { name, ty, value })
 }
 
 fn parse_while_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
@@ -619,6 +692,109 @@ fn add(a: u64, b: u64) -> u64
             assert_eq!(f.name, "add");
             assert_eq!(f.params.len(), 2);
             assert_eq!(f.invariants.len(), 2);
+        } else {
+            panic!("Expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_sovereign_types() {
+        let src = r#"
+fn verify_tx(signer: Wallet, hash: TxHash, gas_used: Gas) -> bool
+    where {
+        gas_used > 0
+    }
+{
+    return true;
+}
+"#;
+        let program = parse_program(src);
+        assert!(program.is_ok(), "Failed to parse sovereign types: {:?}", program.err());
+        let p = program.unwrap();
+        if let Item::Function(f) = &p.items[0] {
+            assert_eq!(f.name, "verify_tx");
+            assert_eq!(f.params.len(), 3);
+            assert!(matches!(f.params[0].ty, Type::Wallet));
+            assert!(matches!(f.params[1].ty, Type::TxHash));
+            assert!(matches!(f.params[2].ty, Type::Gas));
+        } else {
+            panic!("Expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_assumes_clause() {
+        let src = r#"
+fn transfer(from: Wallet, to: Wallet, amount: u256) -> u256
+    assumes {
+        from != to
+    }
+    where {
+        amount > 0
+    }
+{
+    return amount;
+}
+"#;
+        let program = parse_program(src);
+        assert!(program.is_ok(), "Failed to parse assumes clause: {:?}", program.err());
+        let p = program.unwrap();
+        if let Item::Function(f) = &p.items[0] {
+            assert_eq!(f.name, "transfer");
+            assert_eq!(f.assumes.len(), 1, "Expected 1 assumption");
+            assert_eq!(f.invariants.len(), 1, "Expected 1 invariant");
+        } else {
+            panic!("Expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_emit_statement() {
+        let src = r#"
+fn send(amount: u64) -> u64
+    where { amount > 0 }
+{
+    emit Transfer(amount);
+    return amount;
+}
+"#;
+        let program = parse_program(src);
+        assert!(program.is_ok(), "Failed to parse emit statement: {:?}", program.err());
+        let p = program.unwrap();
+        if let Item::Function(f) = &p.items[0] {
+            assert_eq!(f.body.stmts.len(), 2);
+            if let Stmt::Emit { event, args } = &f.body.stmts[0] {
+                assert_eq!(event, "Transfer");
+                assert_eq!(args.len(), 1);
+            } else {
+                panic!("Expected Emit statement, got: {:?}", f.body.stmts[0]);
+            }
+        } else {
+            panic!("Expected function");
+        }
+    }
+
+    #[test]
+    fn test_parse_ghost_statement() {
+        let src = r#"
+fn swap(x: u256, y: u256) -> u256
+    where { x > 0, y > 0 }
+{
+    ghost k: u256 = x * y;
+    return x;
+}
+"#;
+        let program = parse_program(src);
+        assert!(program.is_ok(), "Failed to parse ghost statement: {:?}", program.err());
+        let p = program.unwrap();
+        if let Item::Function(f) = &p.items[0] {
+            assert_eq!(f.body.stmts.len(), 2);
+            if let Stmt::Ghost { name, ty, .. } = &f.body.stmts[0] {
+                assert_eq!(name, "k");
+                assert!(matches!(ty, Type::U256));
+            } else {
+                panic!("Expected Ghost statement, got: {:?}", f.body.stmts[0]);
+            }
         } else {
             panic!("Expected function");
         }

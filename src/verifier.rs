@@ -19,6 +19,7 @@ use colored::Colorize;
 use sha3::{Digest, Sha3_256};
 use std::collections::{HashMap, HashSet};
 use std::time::Instant;
+use tracing::{info, warn, info_span};
 
 #[derive(Debug)]
 pub struct VerifyResult {
@@ -53,6 +54,7 @@ pub fn verify_program(program: &Program, type_env: &TypeEnv) -> Vec<VerifyResult
 }
 
 fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Invariant]) -> VerifyResult {
+    let _span = info_span!("verify_function", fn_name = %func.name).entered();
     let start = Instant::now();
     let mut cfg = Config::new();
     cfg.set_param_value("timeout", "5000"); // Dynamic timeout (5000ms) for division/rounding bounds
@@ -92,6 +94,15 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
     // Contract-level invariants are assumed in pre-state and verified in post-state
     // They represent global truths that MUST survive every function execution
     let contract_pre_invs: Vec<&Invariant> = contract_invariants.iter().collect();
+
+    // Step 0: Assert assumes (environment axioms — trusted, not proven)
+    // These are the Frontera Determinista: facts about the external environment
+    // that the verifier accepts without proof (e.g., chain state, oracle prices)
+    for assumption in &func.assumes {
+        if let Some(z3_assume) = invariant_to_z3(&ctx, &assumption.expr, &pre_vars, &post_vars) {
+            solver.assert(&z3_assume);
+        }
+    }
 
     // Step 1: Assert preconditions (function-level)
     for pre in &preconditions {
@@ -270,7 +281,7 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
         hex::encode(hasher.finalize())
     };
 
-    VerifyResult {
+    let result = VerifyResult {
         fn_name: func.name.clone(),
         invariants_checked: func.invariants.len() + contract_invariants.len(),
         preconditions_count: preconditions.len(),
@@ -279,7 +290,24 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
         counterexample,
         duration_ms: start.elapsed().as_secs_f64() * 1000.0,
         proof_hash,
+    };
+
+    if result.verified {
+        info!(
+            fn_name = %result.fn_name,
+            duration_ms = result.duration_ms,
+            proof_hash = %&result.proof_hash[..16],
+            "Function verified"
+        );
+    } else {
+        warn!(
+            fn_name = %result.fn_name,
+            duration_ms = result.duration_ms,
+            "Function verification FAILED"
+        );
     }
+
+    result
 }
 
 // --- Invariant classification ---
@@ -438,6 +466,20 @@ fn encode_body_effects<'ctx>(
                         modified.insert(var_name.clone());
                     }
                 }
+            },
+            Stmt::Ghost { name, value, .. } => {
+                // Ghost variables exist only in the proof domain.
+                // Create a Z3 variable and bind it to the expression value.
+                // These are NOT compiled to silicon — they exist for Z3 reasoning only.
+                if let Some(z3_val) = expr_to_z3(ctx, value, &current_vars) {
+                    let ghost_var = Int::new_const(ctx, format!("ghost_{}", name).as_str());
+                    solver.assert(&ghost_var._eq(&z3_val));
+                    current_vars.insert(name.clone(), ghost_var);
+                }
+            },
+            Stmt::Emit { .. } => {
+                // Emit statements have no effect on Z3 verification state.
+                // They are on-chain event markers, compiled to LOG opcodes.
             },
             _ => {} // Return, etc. — no effect on Z3 state
         }
@@ -644,7 +686,59 @@ fn invariant_to_z3<'ctx>(
         },
         InvariantExpr::Not(a) => Some(invariant_to_z3(ctx, a, pre_vars, post_vars)?.not()),
         InvariantExpr::True => Some(Bool::from_bool(ctx, true)),
-        _ => None,
+        InvariantExpr::Forall { var, domain, body } => {
+            // Quantified assertion: ∀ var ∈ [0, domain) : body
+            // Create a bounded integer variable for the quantifier
+            let bound_var = Int::new_const(ctx, var.as_str());
+            let zero = Int::from_i64(ctx, 0);
+            let domain_z3 = inv_term_to_z3(ctx, domain, pre_vars, post_vars)?;
+
+            // Construct: ∀ bound_var: (0 <= bound_var < domain) => body
+            // We encode this as: NOT EXISTS bound_var: (0 <= bound_var < domain) AND NOT body
+            // Which Z3 can handle via its quantifier reasoning
+            let mut augmented_pre = pre_vars.clone();
+            augmented_pre.insert(var.clone(), bound_var.clone());
+            let mut augmented_post = post_vars.clone();
+            augmented_post.insert(var.clone(), bound_var.clone());
+
+            let body_z3 = invariant_to_z3(ctx, body, &augmented_pre, &augmented_post)?;
+            let range = Bool::and(ctx, &[&bound_var.ge(&zero), &bound_var.lt(&domain_z3)]);
+            let implication = range.implies(&body_z3);
+
+            // Use Z3's native forall
+            let pattern = z3::Pattern::new(ctx, &[&bound_var as &dyn Ast]);
+            let quantified = z3::ast::forall_const(
+                ctx,
+                &[&bound_var],
+                &[&pattern],
+                &implication,
+            );
+            Some(quantified)
+        },
+        InvariantExpr::Exists { var, domain, body } => {
+            // Existential: ∃ var ∈ [0, domain) : body
+            let bound_var = Int::new_const(ctx, var.as_str());
+            let zero = Int::from_i64(ctx, 0);
+            let domain_z3 = inv_term_to_z3(ctx, domain, pre_vars, post_vars)?;
+
+            let mut augmented_pre = pre_vars.clone();
+            augmented_pre.insert(var.clone(), bound_var.clone());
+            let mut augmented_post = post_vars.clone();
+            augmented_post.insert(var.clone(), bound_var.clone());
+
+            let body_z3 = invariant_to_z3(ctx, body, &augmented_pre, &augmented_post)?;
+            let range = Bool::and(ctx, &[&bound_var.ge(&zero), &bound_var.lt(&domain_z3)]);
+            let conjunction = Bool::and(ctx, &[&range, &body_z3]);
+
+            let pattern = z3::Pattern::new(ctx, &[&bound_var as &dyn Ast]);
+            let quantified = z3::ast::exists_const(
+                ctx,
+                &[&bound_var],
+                &[&pattern],
+                &conjunction,
+            );
+            Some(quantified)
+        },
     }
 }
 

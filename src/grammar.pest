@@ -15,7 +15,7 @@ block_comment = _{ "/*" ~ (!"*/" ~ ANY)* ~ "*/" }
 
 // --- Program Structure ---
 program = { SOI ~ item* ~ EOI }
-item    = _{ fn_def | struct_def | const_def | contract_def }
+item    = _{ fn_def | struct_def | const_def | contract_def | ghost_var }
 
 // --- Contract (module for smart contracts) ---
 contract_def = {
@@ -29,8 +29,16 @@ fn_def = {
     visibility? ~ "fn" ~ ident ~
     "(" ~ param_list? ~ ")" ~
     ("->" ~ type_expr)? ~
+    assumes_clause? ~
     where_clause? ~
     block
+}
+
+// --- Assumes Clause (Environment Axioms) ---
+// Declarations of facts the verifier TRUSTS without proving.
+// These are assertions about the external environment (e.g., chain state).
+assumes_clause = {
+    "assumes" ~ "{" ~ invariant ~ ("," ~ invariant)* ~ ","? ~ "}"
 }
 
 visibility = { "pub" }
@@ -82,6 +90,7 @@ type_expr = { array_type | map_type | option_type | result_type | base_type }
 base_type   = { "u8" | "u16" | "u32" | "u64" | "u128" | "u256"
               | "i8" | "i16" | "i32" | "i64" | "i128"
               | "bool" | "Address" | "String" | "Unit"
+              | "Wallet" | "Signature" | "TxHash" | "Gas"
               | ident }
 
 array_type  = { "[" ~ type_expr ~ "]" }
@@ -103,7 +112,14 @@ const_def = {
 
 // --- Statements ---
 block = { "{" ~ stmt* ~ expr? ~ "}" }
-stmt  = _{ let_stmt | assign_stmt | if_stmt | while_stmt | return_stmt | assert_stmt | expr_stmt }
+stmt  = _{ let_stmt | assign_stmt | if_stmt | while_stmt | return_stmt | assert_stmt | emit_stmt | ghost_stmt | expr_stmt }
+
+// --- Ghost Variables (Proof-only, not compiled) ---
+ghost_var  = { "ghost" ~ ident ~ ":" ~ type_expr ~ "=" ~ expr ~ ";" }
+ghost_stmt = { "ghost" ~ ident ~ ":" ~ type_expr ~ "=" ~ expr ~ ";" }
+
+// --- Emit Statement (On-chain event emission) ---
+emit_stmt  = { "emit" ~ ident ~ "(" ~ arg_list? ~ ")" ~ ";" }
 
 let_stmt    = { "let" ~ "mut"? ~ ident ~ (":" ~ type_expr)? ~ "=" ~ expr ~ ";" }
 assign_stmt = { lvalue ~ assign_op ~ expr ~ ";" }

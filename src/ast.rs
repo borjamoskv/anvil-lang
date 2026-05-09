@@ -13,6 +13,8 @@ pub enum Item {
     Struct(StructDef),
     Const(ConstDef),
     Contract(ContractDef),
+    /// Ghost variable — exists only in the proof domain, not compiled to silicon
+    GhostVar(GhostVarDef),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -28,6 +30,8 @@ pub struct StateVar { pub name: String, pub ty: Type, pub default: Option<Expr>,
 pub struct FnDef {
     pub name: String, pub is_pub: bool, pub params: Vec<Param>,
     pub return_type: Option<Type>, pub invariants: Vec<Invariant>,
+    /// Environment axioms — trusted without proof (Frontera Determinista)
+    pub assumes: Vec<Invariant>,
     pub body: Block, pub span: Option<Span>,
 }
 
@@ -42,6 +46,11 @@ pub struct Field { pub name: String, pub ty: Type, pub is_pub: bool }
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ConstDef { pub name: String, pub ty: Type, pub value: Expr, pub span: Option<Span> }
+
+/// Ghost variable definition — exists only in the proof domain.
+/// Not compiled to silicon. Used for auxiliary reasoning in Z3.
+#[derive(Debug, Clone, Serialize)]
+pub struct GhostVarDef { pub name: String, pub ty: Type, pub value: Expr, pub span: Option<Span> }
 
 // THE CORE INNOVATION: Invariants as first-class AST nodes
 #[derive(Debug, Clone, Serialize)]
@@ -72,6 +81,11 @@ pub enum Type {
     U8, U16, U32, U64, U128, U256,
     I8, I16, I32, I64, I128,
     Bool, Address, String, Unit,
+    // Sovereign on-chain primitives (Mandate 8: Dinero = Energía = Información)
+    Wallet,     // 32-byte public key / account identifier
+    Signature,  // 65-byte ECDSA/EdDSA signature
+    TxHash,     // 32-byte transaction hash
+    Gas,        // u64-bounded execution cost unit
     Array(Box<Type>), Map(Box<Type>, Box<Type>),
     Option(Box<Type>), Result(Box<Type>, Box<Type>),
     Named(std::string::String),
@@ -103,6 +117,10 @@ pub enum Stmt {
     While { condition: Expr, invariants: Vec<Invariant>, body: Block },
     Return(Option<Expr>),
     Assert { condition: Expr, message: Option<String> },
+    /// On-chain event emission (compiled to LOG opcode or equivalent)
+    Emit { event: String, args: Vec<Expr> },
+    /// Ghost statement — proof-only binding, stripped from codegen
+    Ghost { name: String, ty: Type, value: Expr },
     Expr(Expr),
 }
 

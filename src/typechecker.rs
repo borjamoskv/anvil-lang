@@ -11,6 +11,7 @@
 use crate::ast::*;
 use colored::Colorize;
 use std::collections::HashMap;
+use tracing::debug;
 
 /// Type environment: maps variable names to their declared types
 #[derive(Debug, Clone)]
@@ -164,6 +165,32 @@ impl TypeEnv {
                 });
             }
             // Bool, Address, String, etc. — no numeric constraints
+            // Sovereign on-chain types — mapped to fixed-size byte layouts
+            Type::Wallet | Type::TxHash => {
+                // 32-byte = 256-bit identifier, treated as u256 for Z3
+                self.constraints.push(TypeConstraint {
+                    var_name: name.to_string(),
+                    kind: ConstraintKind::NonNegative,
+                });
+                self.constraints.push(TypeConstraint {
+                    var_name: name.to_string(),
+                    kind: ConstraintKind::UpperBound { bits: 256 },
+                });
+            }
+            Type::Signature => {
+                // 65-byte ECDSA signature — no numeric constraints (opaque)
+            }
+            Type::Gas => {
+                // Gas is u64-bounded
+                self.constraints.push(TypeConstraint {
+                    var_name: name.to_string(),
+                    kind: ConstraintKind::NonNegative,
+                });
+                self.constraints.push(TypeConstraint {
+                    var_name: name.to_string(),
+                    kind: ConstraintKind::UpperBound { bits: 64 },
+                });
+            }
             _ => {}
         }
     }
@@ -179,8 +206,21 @@ pub fn check_program(program: &Program) -> TypeEnv {
             Item::Contract(c) => check_contract(c, &mut env),
             Item::Struct(_) => {} // Struct definitions are type declarations
             Item::Const(c) => check_const(c, &mut env),
+            Item::GhostVar(g) => {
+                // Ghost variables: bind in proof domain
+                env.bind(g.name.clone(), g.ty.clone());
+                env.register_constraints(&g.name, &g.ty);
+            },
         }
     }
+
+    debug!(
+        bindings = env.bindings.len(),
+        constraints = env.constraints.len(),
+        errors = env.errors.len(),
+        warnings = env.warnings.len(),
+        "Type checking complete"
+    );
 
     env
 }
@@ -299,6 +339,26 @@ fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str) {
             }
             Stmt::Return(Some(expr)) => {
                 let _ = infer_expr_type(expr, env);
+            }
+            Stmt::Ghost { name, ty, value, .. } => {
+                // Ghost variables: bind in proof domain only
+                let val_ty = infer_expr_type(value, env);
+                if let Some(ref inferred) = val_ty {
+                    if !types_compatible(inferred, ty) {
+                        env.warnings.push(TypeWarning {
+                            message: format!(
+                                "Ghost variable '{}' type mismatch: declared {}, inferred {}",
+                                name, format_type(ty), format_type(inferred)
+                            ),
+                            location: fn_name.to_string(),
+                        });
+                    }
+                }
+                env.bind(name.clone(), ty.clone());
+                env.register_constraints(name, ty);
+            }
+            Stmt::Emit { .. } => {
+                // Emit statements are passthrough for type checking
             }
             _ => {}
         }
@@ -427,7 +487,7 @@ fn invariant_guards_underflow(inv: &InvariantExpr, var_name: &str, _value: &Expr
 // --- Type utilities ---
 
 fn is_unsigned(ty: &Type) -> bool {
-    matches!(ty, Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::U256)
+    matches!(ty, Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::U256 | Type::Gas)
 }
 
 fn types_compatible(got: &Type, expected: &Type) -> bool {
@@ -479,6 +539,8 @@ fn format_type(ty: &Type) -> String {
         Type::I128 => "i128".into(),
         Type::Bool => "bool".into(), Type::Address => "Address".into(),
         Type::String => "String".into(), Type::Unit => "()".into(),
+        Type::Wallet => "Wallet".into(), Type::Signature => "Signature".into(),
+        Type::TxHash => "TxHash".into(), Type::Gas => "Gas".into(),
         Type::Array(t) => format!("[{}]", format_type(t)),
         Type::Map(k, v) => format!("Map<{}, {}>", format_type(k), format_type(v)),
         Type::Option(t) => format!("Option<{}>", format_type(t)),

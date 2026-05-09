@@ -14,6 +14,7 @@ mod saas;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use std::path::PathBuf;
+use tracing::{info, error, info_span};
 
 #[derive(Parser)]
 #[command(
@@ -64,6 +65,15 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
+    // Initialize structured logging (respects RUST_LOG env var)
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_target(false)
+        .init();
+
     let cli = Cli::parse();
 
     print_banner();
@@ -81,16 +91,18 @@ fn print_banner() {
     eprintln!();
     eprintln!("{}", "  ╔═══════════════════════════════════════════╗".bright_blue());
     eprintln!("{}", "  ║   ▄▀█ ███▄ █ █ █ █ █   █                 ║".bright_blue());
-    eprintln!("{}", "  ║   █▀█ █  ▀██ ▀▄▀ █ █▄▄ █▄▄    v0.5      ║".bright_blue());
+    eprintln!("{}", "  ║   █▀█ █  ▀██ ▀▄▀ █ █▄▄ █▄▄    v0.6      ║".bright_blue());
     eprintln!("{}", "  ║   Where trust doesn't compile.            ║".bright_blue());
     eprintln!("{}", "  ╚═══════════════════════════════════════════╝".bright_blue());
     eprintln!();
 }
 
 fn cmd_check(file: &PathBuf) {
+    let _span = info_span!("cmd_check", file = %file.display()).entered();
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
+            error!(file = %file.display(), error = %e, "Cannot read source file");
             eprintln!("  {} Cannot read {}: {}", "✗".bright_red(), file.display(), e);
             std::process::exit(1);
         }
@@ -113,6 +125,7 @@ fn cmd_check(file: &PathBuf) {
         _ => 0,
     }).sum();
 
+    info!(functions = fn_count, invariants = inv_count, "Parse complete");
     eprintln!("  {} Parsed: {} functions, {} invariants",
         "✓".bright_green(), fn_count, inv_count);
 
@@ -122,6 +135,7 @@ fn cmd_check(file: &PathBuf) {
     typechecker::print_type_report(&type_env);
 
     if !type_env.errors.is_empty() {
+        error!(errors = type_env.errors.len(), "Type checking failed");
         eprintln!("  {} Type checking failed. Fix type errors before verification.",
             "✗".bright_red().bold());
         std::process::exit(1);
@@ -133,15 +147,22 @@ fn cmd_check(file: &PathBuf) {
     verifier::print_results(&results);
 
     let all_ok = results.iter().all(|r| r.verified);
+    if all_ok {
+        info!(postconditions = results.len(), "All postconditions proven");
+    } else {
+        error!("Verification failed");
+    }
     if !all_ok {
         std::process::exit(1);
     }
 }
 
 fn cmd_build(file: &PathBuf, output: &PathBuf, target: &str) {
+    let _span = info_span!("cmd_build", file = %file.display(), target = target).entered();
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
+            error!(file = %file.display(), error = %e, "Cannot read source file");
             eprintln!("  {} Cannot read {}: {}", "✗".bright_red(), file.display(), e);
             std::process::exit(1);
         }
@@ -163,6 +184,7 @@ fn cmd_build(file: &PathBuf, output: &PathBuf, target: &str) {
     typechecker::print_type_report(&type_env);
 
     if !type_env.errors.is_empty() {
+        error!(errors = type_env.errors.len(), "Type checking failed");
         eprintln!("  {} Type checking failed.", "✗".bright_red().bold());
         std::process::exit(1);
     }
@@ -173,6 +195,7 @@ fn cmd_build(file: &PathBuf, output: &PathBuf, target: &str) {
 
     let all_ok = results.iter().all(|r| r.verified);
     if !all_ok {
+        error!("Build aborted: verification failed");
         eprintln!("  {} Cannot build: verification failed. Fix your invariants.",
             "✗".bright_red().bold());
         std::process::exit(1);
@@ -183,16 +206,28 @@ fn cmd_build(file: &PathBuf, output: &PathBuf, target: &str) {
         let llvm_ir = llvm_ir::generate_llvm_ir(&program);
         let out_path = output.with_extension("ll");
         match std::fs::write(&out_path, &llvm_ir) {
-            Ok(_) => eprintln!("  {} Generated {} ({} bytes)", "✓".bright_green(), out_path.display(), llvm_ir.len()),
-            Err(e) => eprintln!("  {} Cannot write {}: {}", "✗".bright_red(), out_path.display(), e),
+            Ok(_) => {
+                info!(path = %out_path.display(), bytes = llvm_ir.len(), "LLVM IR generated");
+                eprintln!("  {} Generated {} ({} bytes)", "✓".bright_green(), out_path.display(), llvm_ir.len());
+            }
+            Err(e) => {
+                error!(path = %out_path.display(), error = %e, "Cannot write LLVM IR");
+                eprintln!("  {} Cannot write {}: {}", "✗".bright_red(), out_path.display(), e);
+            }
         }
     } else {
         eprintln!("  {} Generating Rust...", "→".bright_blue());
         let rust_code = codegen::generate_rust(&program);
         let out_path = output.with_extension("rs");
         match std::fs::write(&out_path, &rust_code) {
-            Ok(_) => eprintln!("  {} Generated {} ({} bytes)", "✓".bright_green(), out_path.display(), rust_code.len()),
-            Err(e) => eprintln!("  {} Cannot write {}: {}", "✗".bright_red(), out_path.display(), e),
+            Ok(_) => {
+                info!(path = %out_path.display(), bytes = rust_code.len(), "Rust code generated");
+                eprintln!("  {} Generated {} ({} bytes)", "✓".bright_green(), out_path.display(), rust_code.len());
+            }
+            Err(e) => {
+                error!(path = %out_path.display(), error = %e, "Cannot write Rust code");
+                eprintln!("  {} Cannot write {}: {}", "✗".bright_red(), out_path.display(), e);
+            }
         }
     }
 
@@ -212,6 +247,7 @@ fn emit_cortex_manifest(
     output: &PathBuf,
     results: &[verifier::VerifyResult],
 ) {
+    let _span = info_span!("emit_cortex_manifest").entered();
     let manifest_path = output.with_extension("cortex_manifest.json");
 
     let functions: Vec<serde_json::Value> = results.iter().map(|r| {
@@ -240,6 +276,7 @@ fn emit_cortex_manifest(
 
     match std::fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap()) {
         Ok(_) => {
+            info!(path = %manifest_path.display(), proofs = results.len(), "CORTEX manifest emitted");
             eprintln!("  {} CORTEX manifest: {} ({} proofs)",
                 "🔐".to_string().as_str(),
                 manifest_path.display(),
@@ -247,6 +284,7 @@ fn emit_cortex_manifest(
             );
         }
         Err(e) => {
+            error!(path = %manifest_path.display(), error = %e, "Cannot write CORTEX manifest");
             eprintln!("  {} Cannot write manifest {}: {}",
                 "⚠".bright_yellow(), manifest_path.display(), e);
         }
@@ -254,9 +292,11 @@ fn emit_cortex_manifest(
 }
 
 fn cmd_ast(file: &PathBuf) {
+    let _span = info_span!("cmd_ast", file = %file.display()).entered();
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
+            error!(file = %file.display(), error = %e, "Cannot read source file");
             eprintln!("  {} Cannot read {}: {}", "✗".bright_red(), file.display(), e);
             std::process::exit(1);
         }
