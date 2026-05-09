@@ -1,0 +1,17 @@
+struct AMMPool {
+    reserve_x: u64,
+    reserve_y: u64
+}
+
+fn swap(reserve_x: u64, reserve_y: u64, amount_in_x: u64, amount_out_y: u64) -> u64
+    where {
+        reserve_x > 0,
+        reserve_y > 0,
+        amount_in_x > 0,
+        reserve_x' * reserve_y' >= reserve_x * reserve_y
+    }
+{
+    reserve_x += amount_in_x;
+    reserve_y -= amount_out_y;
+    return amount_out_y;
+}

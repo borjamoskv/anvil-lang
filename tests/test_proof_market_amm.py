@@ -44,7 +44,7 @@ fn swap(reserve_x: u64, reserve_y: u64, amount_in_x: u64, amount_out_y: u64) -> 
             text=True
         )
         
-        output = process.stderr if process.stderr else process.stdout
+        output = process.stdout + process.stderr
         
         print("==================================================")
         print("ORACLE RESPONSE:")

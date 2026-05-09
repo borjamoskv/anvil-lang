@@ -20,6 +20,14 @@ class ProofMarketHandler(http.server.SimpleHTTPRequestHandler):
                 source_code = request.get('source_code', '')
                 stripe_session_id = request.get('stripe_session_id', '')
                 
+                # 0. Límite Termodinámico (Prevenir Exhaustión de Memoria)
+                if len(source_code) > 50 * 1024: # 50 KB max
+                    self.send_response(413)
+                    self.send_header('Content-type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(b'{"detail": "Payload Too Large: Exceeds 50KB strict limit"}')
+                    return
+                
                 # 1. Billing Validation
                 if not stripe_session_id.startswith('cs_'):
                     self.send_response(402)
@@ -36,25 +44,31 @@ class ProofMarketHandler(http.server.SimpleHTTPRequestHandler):
                     temp_path = temp_file.name
 
                 try:
-                    # 3. Z3 Execution Pipeline
+                    # 3. Z3 Execution Pipeline con Hard Timeout
                     workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
                     
-                    process = subprocess.run(
-                        ["./target/debug/anvil", "check", temp_path],
-                        cwd=workspace_root,
-                        capture_output=True,
-                        text=True
-                    )
+                    try:
+                        process = subprocess.run(
+                            ["./target/debug/anvil", "check", temp_path],
+                            cwd=workspace_root,
+                            capture_output=True,
+                            text=True,
+                            timeout=10.0 # Evitar Z3 Solver Hangs (DoS)
+                        )
+                        output = process.stderr if process.stderr else process.stdout
+                        returncode = process.returncode
+                    except subprocess.TimeoutExpired:
+                        returncode = -1
+                        output = "VULNERABILITY DETECTED: Thermodynamic Timeout (Z3 Solver exhausted). Possible malicious infinite loop."
 
                     execution_time_ms = (time.time() - start_time) * 1000
-                    output = process.stderr if process.stderr else process.stdout
 
                     # 4. Axiomatic Resolution
                     self.send_response(200)
                     self.send_header('Content-type', 'application/json')
                     self.end_headers()
 
-                    if process.returncode == 0:
+                    if returncode == 0:
                         # SATISFIED (UNSAT for exploits)
                         payload = f"{source_code}|{start_time}|ANVIL_MASTER_KEY".encode('utf-8')
                         cert_hash = hashlib.sha256(payload).hexdigest()
