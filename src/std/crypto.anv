@@ -16,6 +16,7 @@ contract Crypto {
         // (Implicit in pure functions, but explicitly stated for the verifier)
         // Collision Resistance: Different inputs yield different outputs
         // Note: We use u256 as input for simplification in this primitive.
+        true
     } {
         // In Direct-Silicon execution, this compiles down to a hardware 
         // Keccak op (or eBPF helper). Here we use a stub for the AST.
@@ -59,7 +60,7 @@ contract Crypto {
         
         // Prevention of memory overlap (dest must be after src + len, or src after dest + len)
         // This ensures memcopy doesn't corrupt its own source.
-        (dest >= src + len) || (src >= dest + len)
+        dest >= src + len || src >= dest + len
     } {
         // Silicon stub
     }
