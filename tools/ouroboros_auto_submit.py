@@ -344,7 +344,22 @@ def clipboard_inject(text: str) -> bool:
 
 
 def append_ledger(entry: dict) -> None:
-    """Append a submission record to the JSONL ledger."""
+    """Append a submission record to the JSONL ledger with idempotency (target_id + report_hash)."""
+    # Deduplicate: check if same target_id and report_hash already exist
+    if LEDGER_PATH.exists():
+        with open(str(LEDGER_PATH), "r") as f:
+            for line in f:
+                if not line.strip():
+                    continue
+                try:
+                    existing = json.loads(line)
+                    if existing.get("target_id") == entry.get("target_id") and \
+                       existing.get("report_hash") == entry.get("report_hash"):
+                        logger.info(f"Idempotency matched: submission for {entry.get('target_id')} with hash {entry.get('report_hash')} already in ledger.")
+                        return
+                except json.JSONDecodeError:
+                    continue
+                    
     with open(str(LEDGER_PATH), "a") as f:
         f.write(json.dumps(entry, default=str) + "\n")
 
