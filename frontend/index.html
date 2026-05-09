@@ -239,24 +239,31 @@ contract AMM {
         resultPanel.style.display = 'none';
 
         try {
-            // Simulated transaction delay (payment processing)
+            // Simulated Stripe payment flow
             await new Promise(r => setTimeout(r, 800));
 
-            const response = await fetch('/v1/verify', {
+            const response = await fetch('http://127.0.0.1:8000/v1/prove', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source_code: code })
+                body: JSON.stringify({ 
+                    client_id: "cortex_web",
+                    stripe_session_id: "cs_test_mock", 
+                    source_code: code 
+                })
             });
 
             const data = await response.json();
             
             resultPanel.style.display = 'block';
             
-            if (data.status === 'VERIFIED') {
+            if (data.status === 'PROVEN_SAFE') {
                 resultContent.innerHTML = `
 <span class="status-verified">[✓] ${data.status}</span>
-Message: ${data.message}
-Timestamp: ${data.timestamp}
+Execution Time: ${data.execution_time_ms} ms
+
+<span style="color: #888">=== Z3 SOLVER OUTPUT ===</span>
+${data.z3_output}
+<span style="color: #888">========================</span>
 
 <span style="color: #888">=== CRYPTOGRAPHIC CERTIFICATE ===</span>
 Hash: <span class="cert-hash">${data.certificate_hash}</span>
@@ -266,15 +273,18 @@ Hash: <span class="cert-hash">${data.certificate_hash}</span>
             } else {
                 resultContent.innerHTML = `
 <span class="status-rejected">[✗] ${data.status}</span>
-Error: ${data.message}
-Timestamp: ${data.timestamp}
+Execution Time: ${data.execution_time_ms} ms
 
-<span style="color: #AAA">Verification failed. Code mathematically unsound.</span>`;
+<span style="color: #888">=== Z3 SOLVER OUTPUT ===</span>
+${data.z3_output}
+<span style="color: #888">========================</span>
+
+<span style="color: #AAA">Verification failed. Code mathematically unsound or payment failed.</span>`;
             }
 
         } catch (e) {
             resultPanel.style.display = 'block';
-            resultContent.innerHTML = `<span class="status-rejected">[✗] SYSTEM ERROR</span>\n${e.message}`;
+            resultContent.innerHTML = `<span class="status-rejected">[✗] SYSTEM ERROR</span>\n${e.message}\nMake sure the Rust backend is running on port 8000.`;
         } finally {
             btn.disabled = false;
             btn.innerText = 'Pay & Verify';

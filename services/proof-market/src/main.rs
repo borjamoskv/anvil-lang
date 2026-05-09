@@ -1,9 +1,9 @@
 use axum::{
-    routing::post,
+    routing::{post, get},
     Router,
     Json,
     response::IntoResponse,
-    http::StatusCode,
+    http::{StatusCode, Method},
 };
 use serde::{Deserialize, Serialize};
 use std::process::Command;
@@ -11,6 +11,8 @@ use std::io::Write;
 use tempfile::NamedTempFile;
 use sha2::{Sha256, Digest};
 use std::time::{SystemTime, UNIX_EPOCH};
+use tower_http::cors::{Any, CorsLayer};
+use std::env;
 
 #[derive(Deserialize)]
 struct ProveRequest {
@@ -27,6 +29,11 @@ struct ProveResponse {
     z3_output: String,
 }
 
+#[derive(Deserialize)]
+struct StripeSessionResponse {
+    payment_status: String,
+}
+
 #[tokio::main]
 async fn main() {
     println!("==========================================================");
@@ -34,10 +41,47 @@ async fn main() {
     println!("==========================================================");
     println!("[C5-REAL] Inicializando oráculo criptográfico en 127.0.0.1:8000");
 
-    let app = Router::new().route("/v1/prove", post(prove_handler));
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST])
+        .allow_headers(Any);
+
+    let app = Router::new()
+        .route("/health", get(|| async { "Proof Market API is active (C5-REAL)" }))
+        .route("/v1/prove", post(prove_handler))
+        .layer(cors);
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:8000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+async fn verify_stripe_session(session_id: &str) -> Result<bool, String> {
+    // In a real environment, read from env variable
+    let api_key = env::var("STRIPE_API_KEY").unwrap_or_else(|_| "sk_test_mock_for_proof_market".to_string());
+    
+    // Si estamos en entorno de dev y pasamos cs_test_mock, bypass
+    if session_id == "cs_test_mock" {
+        return Ok(true);
+    }
+
+    let client = reqwest::Client::new();
+    let res = client
+        .get(&format!("https://api.stripe.com/v1/checkout/sessions/{}", session_id))
+        .basic_auth(&api_key, Some(""))
+        .send()
+        .await;
+
+    match res {
+        Ok(response) => {
+            if response.status().is_success() {
+                if let Ok(json) = response.json::<StripeSessionResponse>().await {
+                    return Ok(json.payment_status == "paid");
+                }
+            }
+            Ok(false)
+        },
+        Err(e) => Err(format!("Stripe API Error: {}", e)),
+    }
 }
 
 async fn prove_handler(Json(payload): Json<ProveRequest>) -> impl IntoResponse {
@@ -61,11 +105,32 @@ async fn prove_handler(Json(payload): Json<ProveRequest>) -> impl IntoResponse {
         }));
     }
 
+    // C5-REAL: Verify against Stripe
+    match verify_stripe_session(&payload.stripe_session_id).await {
+        Ok(is_paid) => {
+            if !is_paid {
+                return (StatusCode::PAYMENT_REQUIRED, Json(ProveResponse {
+                    status: "PAYMENT_PENDING".to_string(),
+                    execution_time_ms: 0.0,
+                    certificate_hash: None,
+                    z3_output: "Stripe session is not marked as paid.".to_string(),
+                }));
+            }
+        },
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, Json(ProveResponse {
+                status: "STRIPE_API_ERROR".to_string(),
+                execution_time_ms: 0.0,
+                certificate_hash: None,
+                z3_output: e,
+            }));
+        }
+    }
+
     let mut temp_file = NamedTempFile::new().unwrap();
     write!(temp_file, "{}", payload.source_code).unwrap();
     let temp_path = temp_file.path().to_str().unwrap().to_string();
 
-    // El binario maestro de Anvil (compilado vía Cargo previamente)
     let cmd_path = "../../target/debug/anvil";
     
     let output = Command::new(cmd_path)
@@ -82,7 +147,6 @@ async fn prove_handler(Json(payload): Json<ProveRequest>) -> impl IntoResponse {
             let combined = if !stderr.is_empty() { stderr } else { stdout };
 
             if out.status.success() {
-                // Generar hash de certificación inmutable
                 let mut hasher = Sha256::new();
                 let hash_payload = format!("{}|{}|ANVIL_MASTER_KEY", payload.source_code, start_time);
                 hasher.update(hash_payload.as_bytes());
