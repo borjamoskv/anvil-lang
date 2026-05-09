@@ -1,5 +1,6 @@
 import time
 import random
+import time
 
 MAX_U64 = 0xFFFFFFFFFFFFFFFF
 

@@ -4,4 +4,12 @@ Cargo.lock
 *.swp
 *.swo
 .DS_Store
-tests/ExploitOracle.t.sol
+
+# CORTEX-Persist: Sovereign Bounty Boundary (Zero-Day Leak Prevention)
+# Do not commit active exploits, drafts, or Immunefi targets to the public repo.
+/targets/
+/bounties/
+target*.anv
+docs/c5_real_audit_*.md
+# Tests containing actual zero-days
+tests/Exploit*.t.sol
