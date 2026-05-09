@@ -1,0 +1,20 @@
+// ============================================================
+// HELLO WORLD — The simplest Anvil program
+//
+// This function adds two numbers and the compiler PROVES
+// that the result equals their sum. No tests. Just math.
+//
+// Run:   anvil check examples/hello.anv
+// Build: anvil build examples/hello.anv -o hello
+// ============================================================
+
+fn add(mut a: u64, b: u64) -> u64
+    where {
+        a > 0,
+        b > 0,
+        a' == a + b
+    }
+{
+    a += b;
+    return a;
+}

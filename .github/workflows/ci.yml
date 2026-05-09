@@ -1,4 +1,4 @@
-name: Rust CI
+name: Anvil CI
 
 on:
   push:
@@ -8,11 +8,13 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
-  build_and_test:
-    name: Build & Verify
+  lint:
+    name: Lint & Format
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
     - uses: actions/checkout@v4
@@ -37,6 +39,31 @@ jobs:
     - name: Lint (Clippy)
       run: cargo clippy -- -D warnings
 
+  build_and_test:
+    name: Build & Test (${{ matrix.rust }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        rust: [stable, "1.85"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Z3 Solver
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y z3 libz3-dev clang llvm
+        z3 --version
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ matrix.rust }}
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
     - name: Build
       run: cargo build --verbose
 
@@ -47,11 +74,42 @@ jobs:
       working-directory: services/proof-market
       run: cargo build --verbose
 
+    - name: Verify Hello World Example
+      run: cargo run -- check examples/hello.anv
+
+    - name: Verify Transfer Example
+      run: cargo run -- check examples/transfer.anv
+
+    - name: Generate Documentation
+      run: cargo doc --no-deps
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build_and_test
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Z3 Solver
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y z3 libz3-dev clang llvm
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Build
+      run: cargo build
+
     - name: Set up Python 3.10
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
         python-version: '3.10'
-
 
     - name: Integration Test - Vault Proof Market
       run: python3 tests/test_proof_market.py
@@ -70,7 +128,7 @@ jobs:
           fi
         done
         echo "  ✓ Manifests generated:"
-        ls -la artifacts/cortex/*.cortex_manifest.json 2>/dev/null || echo "  (no .anv examples found)"
+        ls -la artifacts/cortex/*.cortex_manifest.json 2>/dev/null || echo "  (no manifests generated)"
 
     - name: Upload CORTEX Provenance Artifacts
       uses: actions/upload-artifact@v4
@@ -80,3 +138,20 @@ jobs:
         path: artifacts/cortex/*.cortex_manifest.json
         if-no-files-found: ignore
         retention-days: 90
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Install cargo-audit
+      run: cargo install cargo-audit
+
+    - name: Run Security Audit
+      run: cargo audit
