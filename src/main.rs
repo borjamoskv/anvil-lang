@@ -38,9 +38,12 @@ enum Commands {
     Build {
         /// Path to the .anv file
         file: PathBuf,
-        /// Output path for generated Rust
-        #[arg(short, long, default_value = "out.rs")]
+        /// Output path for generated code
+        #[arg(short, long, default_value = "out")]
         output: PathBuf,
+        /// Target architecture (rust, llvm)
+        #[arg(short, long, default_value = "rust")]
+        target: String,
     },
     /// Parse and dump the AST as JSON
     Ast {
@@ -59,7 +62,7 @@ async fn main() {
 
     match cli.command {
         Commands::Check { file } => cmd_check(&file),
-        Commands::Build { file, output } => cmd_build(&file, &output),
+        Commands::Build { file, output, target } => cmd_build(&file, &output, &target),
         Commands::Ast { file } => cmd_ast(&file),
         Commands::Lsp => lsp::run_server().await,
     }
@@ -126,7 +129,7 @@ fn cmd_check(file: &PathBuf) {
     }
 }
 
-fn cmd_build(file: &PathBuf, output: &PathBuf) {
+fn cmd_build(file: &PathBuf, output: &PathBuf, target: &str) {
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
@@ -166,17 +169,21 @@ fn cmd_build(file: &PathBuf, output: &PathBuf) {
         std::process::exit(1);
     }
 
-    eprintln!("  {} Generating Rust...", "→".bright_blue());
-    let rust_code = codegen::generate_rust(&program);
-
-    match std::fs::write(output, &rust_code) {
-        Ok(_) => {
-            eprintln!("  {} Generated {} ({} bytes)",
-                "✓".bright_green(), output.display(), rust_code.len());
-        },
-        Err(e) => {
-            eprintln!("  {} Cannot write {}: {}", "✗".bright_red(), output.display(), e);
-            std::process::exit(1);
+    if target == "llvm" {
+        eprintln!("  {} Generating LLVM IR...", "→".bright_blue());
+        let llvm_ir = llvm_ir::generate_llvm_ir(&program);
+        let out_path = output.with_extension("ll");
+        match std::fs::write(&out_path, &llvm_ir) {
+            Ok(_) => eprintln!("  {} Generated {} ({} bytes)", "✓".bright_green(), out_path.display(), llvm_ir.len()),
+            Err(e) => eprintln!("  {} Cannot write {}: {}", "✗".bright_red(), out_path.display(), e),
+        }
+    } else {
+        eprintln!("  {} Generating Rust...", "→".bright_blue());
+        let rust_code = codegen::generate_rust(&program);
+        let out_path = output.with_extension("rs");
+        match std::fs::write(&out_path, &rust_code) {
+            Ok(_) => eprintln!("  {} Generated {} ({} bytes)", "✓".bright_green(), out_path.display(), rust_code.len()),
+            Err(e) => eprintln!("  {} Cannot write {}: {}", "✗".bright_red(), out_path.display(), e),
         }
     }
 }

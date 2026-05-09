@@ -1,0 +1,12 @@
+contract SafeBank {
+    fn transfer(sender_balance: u64, amount: u64) -> u64
+        where {
+            amount > 0,
+            sender_balance >= amount,
+            sender_balance' == sender_balance - amount
+        }
+    {
+        sender_balance -= amount;
+        return sender_balance;
+    }
+}
