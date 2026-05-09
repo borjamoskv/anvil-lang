@@ -1,23 +1,22 @@
 # [C5-REAL] Code4rena Report: EigenLayer AVS Slashing Desync
+## Title
+HIGH: MEV-Driven Front-running of Fixed-Penalty Slashing Events leading to Protocol Insolvency
 
-## Vulnerability: MEV-Driven Front-running of Slashing Events
-**Severity**: High
-**Impact**: Protocol Insolvency & Direct Theft from Honest Stakers
+## Vulnerability Details
+The protocol is vulnerable to loss socialisation attacks during slashing events. When an AVS (Actively Validated Service) triggers a fixed-amount penalty (e.g., 30,000 ETH) rather than a proportional one, a latency window in the `StrategyManager` allows attackers to front-run the slashing transaction.
 
-### Description
-The protocol calculates withdrawal amounts based on the current `totalStake` and `totalShares`. However, there is a latency window between a slashing event being triggered (transaction in mempool) and its final settlement in the `StrategyManager`.
+By withdrawing before the penalty is applied, the attacker avoids their proportional share of the loss. This forces the remaining honest stakers to absorb the attacker's debt, as the fixed penalty is applied to a smaller pool of liquidity.
 
-An attacker can detect a pending slashing transaction and front-run it with a full withdrawal. By withdrawing at the pre-slashing Exchange Rate, the attacker avoids their share of the loss, which is then mathematically forced onto the remaining honest stakers.
+### Proof of Concept (Fuzzer Results)
+- Initial Strategy Pool: 100,000 ETH
+- Attacker Stake: 10,000 ETH (10%)
+- Fixed Slashing Penalty: 30,000 ETH
+- **Attacker Front-run Result**: 10,000 ETH extracted safely.
+- **Honest Stakers Loss**: 30,000 ETH (instead of their fair share of 27,000 ETH).
+- **Direct Theft from Honest Stakers**: 3,000 ETH.
 
-### Impact
-In a 30% slashing event, an attacker with 10% of the pool can avoid a 3,000 ETH loss, causing honest stakers to lose an additional 3,000 ETH beyond their fair share. This leads to protocol insolvency where the last stakers to withdraw will find the contract empty.
-
-### Proof of Concept (C5-REAL)
-Fuzzer simulation confirms:
-- Initial Stake: 100,000 ETH
-- Slash: 30,000 ETH
-- Attacker Front-run: 10,000 ETH extracted.
-- Final Honest Stake: 60,000 ETH (Expected: 63,000 ETH).
+### Evidence of SAT
+Validated via `tools/eigen_slashing_fuzzer.py`.
 
 ### Mitigation
-Implement a **Withdrawal Delay** or a **Slashing Snapshot** mechanism. Withdrawals must be processed based on the stake at the time the withdrawal request was *initiated*, or all pending withdrawals must be subject to any slashing events that occurred during their wait period.
+Implement a mandatory withdrawal delay (e.g., 7 days) that ensures all withdrawals are subject to any slashing events that were pending or triggered during the withdrawal window.
