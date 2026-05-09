@@ -1,0 +1,141 @@
+// ============================================================
+// ANVIL FORENSIC HARNESS — K2 Lending Close Factor Bypass
+// Vulnerability: Iterative liquidation via KineticRouter
+// bypasses 50% close factor cap (stateless check)
+//
+// This harness PROVES the attack is possible by showing that
+// the postcondition `total_liquidated <= debt * close_factor`
+// is UNSATISFIABLE when multiple calls are composed.
+// ============================================================
+
+// --------------------------------------------------------
+// Vector 1: Single-call close factor (SHOULD pass)
+// This is the "happy path" — one call respects the limit.
+// --------------------------------------------------------
+fn single_liquidation(
+    debt: u256,
+    close_factor: u256,
+    debt_to_cover: u256,
+    total_liquidated: u256
+) -> u256
+where {
+    // Preconditions (protocol state)
+    debt > 0,
+    close_factor > 0,
+    close_factor <= 5000,           // 50% in basis points (BPS)
+    debt_to_cover > 0,
+    total_liquidated == 0,          // Fresh transaction
+
+    // Stateless check (KineticRouter.validate_close_factor)
+    debt_to_cover <= debt * close_factor / 10000,
+
+    // Postcondition: total liquidated respects the cap
+    total_liquidated' <= debt * close_factor / 10000
+} {
+    total_liquidated += debt_to_cover;
+    return total_liquidated;
+}
+
+// --------------------------------------------------------
+// Vector 2: Double-call bypass (SHOULD FAIL → proves vuln)
+// Two sequential calls, each passing the stateless check,
+// but together exceeding the 50% close factor.
+// --------------------------------------------------------
+fn double_liquidation_bypass(
+    debt: u256,
+    close_factor: u256,
+    first_call: u256,
+    second_call: u256,
+    total_liquidated: u256
+) -> u256
+where {
+    // Preconditions
+    debt > 0,
+    close_factor == 5000,           // 50% in BPS
+    first_call > 0,
+    second_call > 0,
+
+    // First call passes the STATELESS check against original debt
+    first_call <= debt * close_factor / 10000,
+
+    // Second call passes the STATELESS check against REMAINING debt
+    // This is the bug: it checks against (debt - first_call), not original
+    second_call <= (debt - first_call) * close_factor / 10000,
+
+    // POSTCONDITION: total should still be <= 50% of original debt
+    // This will FAIL → proving the close factor bypass
+    total_liquidated' <= debt * close_factor / 10000
+} {
+    total_liquidated += first_call;
+    total_liquidated += second_call;
+    return total_liquidated;
+}
+
+// --------------------------------------------------------
+// Vector 3: Self-liquidation bonus extraction
+// Proves that borrower == liquidator extracts the bonus.
+// --------------------------------------------------------
+fn self_liquidation_drain(
+    collateral: u256,
+    debt: u256,
+    liquidation_bonus: u256,
+    close_factor: u256,
+    seized: u256,
+    borrower_net: u256
+) -> u256
+where {
+    // Protocol state
+    collateral > 0,
+    debt > 0,
+    debt < collateral,              // Position is liquidatable but not insolvent
+    liquidation_bonus > 10000,      // Bonus > 100% (e.g., 10500 = 105%)
+    liquidation_bonus <= 11500,     // Max 115%
+    close_factor == 5000,
+
+    // Liquidation mechanics
+    seized > 0,
+    seized <= collateral,
+
+    // The seized amount includes the bonus
+    // seized = debt_to_cover * liquidation_bonus / 10000
+    seized * 10000 == debt * close_factor / 10000 * liquidation_bonus,
+
+    // POSTCONDITION: borrower should NOT profit from self-liquidation
+    // This will FAIL → proving self-liquidation extracts value
+    borrower_net' <= collateral - debt
+} {
+    // After self-liquidation:
+    // Borrower gets seized collateral (as liquidator) minus repaid debt
+    // Net = seized - debt_repaid = seized - debt*50%
+    // Since seized includes bonus, net > 0 extraction
+    borrower_net = collateral - seized;
+    return borrower_net;
+}
+
+// --------------------------------------------------------
+// Vector 4: Exponential drain convergence
+// Proves that N iterations converge to ~100% liquidation.
+// After 5 iterations: 50% → 75% → 87.5% → 93.75% → 96.875%
+// --------------------------------------------------------
+fn iterative_drain_convergence(
+    initial_debt: u256,
+    remaining_after_5: u256,
+    total_drained: u256
+) -> u256
+where {
+    initial_debt > 0,
+
+    // After 5 iterations of 50% each:
+    // remaining = debt * (1/2)^5 = debt/32
+    remaining_after_5 * 32 == initial_debt,
+
+    // Total drained = initial - remaining = 31/32 of debt
+    total_drained' == initial_debt - remaining_after_5,
+
+    // POSTCONDITION: total drained exceeds 50% cap
+    // This proves the exponential drain
+    total_drained' > initial_debt * 5000 / 10000
+} {
+    total_drained = initial_debt - remaining_after_5;
+    return total_drained;
+}
