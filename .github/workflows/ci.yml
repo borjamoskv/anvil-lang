@@ -43,6 +43,10 @@ jobs:
     - name: Run Tests
       run: cargo test --verbose
 
+    - name: Build Proof Market Oracle (Axum)
+      working-directory: services/proof-market
+      run: cargo build --verbose
+
     - name: Set up Python 3.10
       uses: actions/setup-python@v4
       with:

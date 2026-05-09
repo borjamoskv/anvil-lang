@@ -21,4 +21,10 @@ Por lo tanto, Anvil elimina el intermediario (Rust/EVM) y compila directamente a
 En Anvil v2.0, el desarrollador humano dejará de escribir el "cuerpo" de la función. Solo escribirá las leyes (el contrato social y matemático). El motor LLVM+Z3 sintetizará automáticamente el cuerpo imperativo óptimo para satisfacer esas leyes. 
 Pasamos de "Programación Imperativa" a **"Gobernanza de Invariantes"**.
 
+## 5. El Silicio Complejo: Mapeo de Primitivas DeFi
+Las variables escalares (`u64`) son suficientes para matemáticas teóricas, pero el ecosistema criptoeconómico requiere estructuras complejas (Automated Market Makers, Orderbooks, Vaults). Anvil ha extendido su compilación JIT (LLVM) para mapear estas arquitecturas de manera directa:
+- **`Structs` y `Arrays`** se asignan directamente a la memoria de bajo nivel usando la instrucción `alloca` de LLVM, eliminando la abstracción de objetos.
+- **`HashMaps` (Mapas de Estado)** se traducen a **Opaque Pointers** (punteros genéricos en LLVM), permitiendo que la arquitectura subyacente (ej. eBPF Map FDs o registros RISC-V) los maneje a nivel de hardware.
+Al mapear estas estructuras abstractas de Ethereum (EVM) a topologías físicas, logramos que protocolos enteros operen directamente sobre la memoria caché L1/L2 del silicio, eliminando el "memory overhead" y multiplicando el yield exergético.
+
 *Where trust doesn't compile. Only math touches the silicon.*
