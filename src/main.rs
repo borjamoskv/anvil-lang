@@ -8,6 +8,7 @@ mod typechecker;
 mod verifier;
 mod codegen;
 mod lsp;
+mod llvm_ir;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
