@@ -15,11 +15,15 @@ TARGETS_DIR = os.path.join(BASE, "anvil-lang", "targets")
 
 def _fetch_raw(owner: str, repo: str, path: str, branch: str) -> str | None:
     """Fetch raw file content from GitHub. Returns text or None on failure."""
-    url = (
-        f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
-    )
+    url = f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+
+    req = urllib.request.Request(url)
+    github_token = os.getenv("GITHUB_TOKEN")
+    if github_token:
+        req.add_header("Authorization", f"token {github_token}")
+
     try:
-        with urllib.request.urlopen(urllib.request.Request(url)) as resp:
+        with urllib.request.urlopen(req) as resp:
             return resp.read().decode("utf-8")
     except urllib.error.URLError:
         return None

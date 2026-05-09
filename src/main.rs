@@ -20,7 +20,7 @@ use tracing::{info, error, info_span};
 #[derive(Parser)]
 #[command(
     name = "anvil",
-    version = "0.1.0",
+    version = env!("CARGO_PKG_VERSION"),
     about = "Anvil — A programming language where trust doesn't compile.",
     long_about = "Anvil is a formally verified programming language for smart contracts \
                   and autonomous agents. Every function carries its proof as a first-class \
@@ -37,6 +37,9 @@ enum Commands {
     Check {
         /// Path to the .anv file
         file: PathBuf,
+        /// Output results as JSON (machine-readable)
+        #[arg(long, default_value_t = false)]
+        json: bool,
     },
     /// Compile an Anvil file to Rust
     Build {
@@ -87,7 +90,7 @@ async fn main() {
     print_banner();
 
     match cli.command {
-        Commands::Check { file } => cmd_check(&file),
+        Commands::Check { file, json } => cmd_check(&file, json),
         Commands::Build { file, output, target } => cmd_build(&file, &output, &target),
         Commands::Compile { file } => info!("Iniciando pase de compilación a Rust para: {:?}", file),
         Commands::Singularity => singularity::initiate_engine(),
@@ -107,23 +110,34 @@ fn print_banner() {
     eprintln!();
 }
 
-fn cmd_check(file: &PathBuf) {
+fn cmd_check(file: &PathBuf, json_output: bool) {
     let _span = info_span!("cmd_check", file = %file.display()).entered();
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
-            error!(file = %file.display(), error = %e, "Cannot read source file");
-            eprintln!("  {} Cannot read {}: {}", "✗".bright_red(), file.display(), e);
+            if json_output {
+                println!("{{\"error\": \"Cannot read {}: {}\"}}", file.display(), e);
+            } else {
+                error!(file = %file.display(), error = %e, "Cannot read source file");
+                eprintln!("  {} Cannot read {}: {}", "✗".bright_red(), file.display(), e);
+            }
             std::process::exit(1);
         }
     };
 
-    eprintln!("  {} Parsing {}...", "→".bright_blue(), file.display());
+    if !json_output {
+        eprintln!("  {} Parsing {}...", "→".bright_blue(), file.display());
+    }
 
     let program = match parser::parse_program(&source) {
         Ok(p) => p,
         Err(e) => {
-            eprintln!("  {} {}", "✗".bright_red(), e);
+            if json_output {
+                let detail = e.replace('"', "'");
+                println!("{{\"error\": \"Parse error\", \"detail\": \"{}\"}}", detail);
+            } else {
+                eprintln!("  {} {}", "✗".bright_red(), e);
+            }
             std::process::exit(1);
         }
     };
@@ -135,26 +149,64 @@ fn cmd_check(file: &PathBuf) {
         _ => 0,
     }).sum();
 
-    info!(functions = fn_count, invariants = inv_count, "Parse complete");
-    eprintln!("  {} Parsed: {} functions, {} invariants",
-        "✓".bright_green(), fn_count, inv_count);
+    if !json_output {
+        info!(functions = fn_count, invariants = inv_count, "Parse complete");
+        eprintln!("  {} Parsed: {} functions, {} invariants",
+            "✓".bright_green(), fn_count, inv_count);
+    }
 
     // Type checking pass — bridge mathematical abstraction to silicon bounds
-    eprintln!("  {} Type checking...", "→".bright_blue());
+    if !json_output {
+        eprintln!("  {} Type checking...", "→".bright_blue());
+    }
     let type_env = typechecker::check_program(&program);
-    typechecker::print_type_report(&type_env);
+    if !json_output {
+        typechecker::print_type_report(&type_env);
+    }
 
     if !type_env.errors.is_empty() {
-        error!(errors = type_env.errors.len(), "Type checking failed");
-        eprintln!("  {} Type checking failed. Fix type errors before verification.",
-            "✗".bright_red().bold());
+        if json_output {
+            let errs: Vec<String> = type_env.errors.iter()
+                .map(|e| {
+                    let msg = e.message.replace('"', "'");
+                    format!("{{\"location\": \"{}\", \"message\": \"{}\"}}", e.location, msg)
+                })
+                .collect();
+            println!("{{\"type_errors\": [{}]}}", errs.join(", "));
+        } else {
+            error!(errors = type_env.errors.len(), "Type checking failed");
+            eprintln!("  {} Type checking failed. Fix type errors before verification.",
+                "✗".bright_red().bold());
+        }
         std::process::exit(1);
     }
 
-    eprintln!("  {} Verifying with Z3...", "→".bright_blue());
+    if !json_output {
+        eprintln!("  {} Verifying with Z3...", "→".bright_blue());
+    }
 
     let results = verifier::verify_program(&program, &type_env);
-    verifier::print_results(&results);
+
+    if json_output {
+        // Structured JSON output for CI/CD integration
+        let json_results: Vec<String> = results.iter().map(|r| {
+            let cex = r.counterexample.as_deref().unwrap_or("").replace('"', "'");
+            let warnings: Vec<String> = r.warnings.iter()
+                .map(|w| format!("\"{}\"", w.replace('"', "'")))
+                .collect();
+            format!(
+                "{{\"fn_name\": \"{}\", \"verified\": {}, \"invariants\": {}, \"preconditions\": {}, \"postconditions\": {}, \"proof_hash\": \"{}\", \"duration_ms\": {:.2}, \"counterexample\": \"{}\", \"warnings\": [{}]}}",
+                r.fn_name, r.verified, r.invariants_checked,
+                r.preconditions_count, r.postconditions_count,
+                r.proof_hash, r.duration_ms, cex, warnings.join(", ")
+            )
+        }).collect();
+        let all_ok = results.iter().all(|r| r.verified);
+        println!("{{\"file\": \"{}\", \"functions\": {}, \"invariants\": {}, \"all_verified\": {}, \"results\": [{}]}}",
+            file.display(), fn_count, inv_count, all_ok, json_results.join(", "));
+    } else {
+        verifier::print_results(&results);
+    }
 
     let all_ok = results.iter().all(|r| r.verified);
     if all_ok {

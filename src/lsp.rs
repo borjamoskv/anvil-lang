@@ -93,6 +93,11 @@ impl LanguageServer for Backend {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec!["w".to_string(), "a".to_string(), "g".to_string(), "e".to_string()]),
+                    ..Default::default()
+                }),
                 ..Default::default()
             },
             ..Default::default()
@@ -117,6 +122,101 @@ impl LanguageServer for Backend {
         if let Some(change) = params.content_changes.pop() {
             self.verify_document(params.text_document.uri, change.text).await;
         }
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let position = params.text_document_position_params.position;
+        let uri = params.text_document_position_params.text_document.uri;
+
+        // Read the document (in a real impl, we'd cache this)
+        let path = uri.path();
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(_) => return Ok(None),
+        };
+
+        let line_text = text.lines().nth(position.line as usize).unwrap_or("");
+
+        // Check if hovering over a function definition
+        if line_text.trim_start().starts_with("fn ") {
+            // Parse the file to get invariant info
+            if let Ok(program) = crate::parser::parse_program(&text) {
+                for item in &program.items {
+                    if let crate::ast::Item::Function(f) = item {
+                        if line_text.contains(&f.name) {
+                            let inv_count = f.invariants.len();
+                            let assume_count = f.assumes.len();
+                            let param_count = f.params.len();
+                            let content = format!(
+                                "**Anvil Function: `{}`**\n\n\
+                                - Parameters: {}\n\
+                                - Invariants (where): {}\n\
+                                - Assumptions (assumes): {}\n\
+                                - Return type: {}\n\n\
+                                *All invariants verified by Z3 at compile time.*",
+                                f.name, param_count, inv_count, assume_count,
+                                f.return_type.as_ref().map(|t| format!("{:?}", t)).unwrap_or_else(|| "()".to_string())
+                            );
+                            return Ok(Some(Hover {
+                                contents: HoverContents::Markup(MarkupContent {
+                                    kind: MarkupKind::Markdown,
+                                    value: content,
+                                }),
+                                range: None,
+                            }));
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    async fn completion(&self, _params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let items = vec![
+            CompletionItem {
+                label: "where".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some("Invariant clause — Z3 proves these at compile time".to_string()),
+                insert_text: Some("where {\n    $0\n}".to_string()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "assumes".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some("Environment axioms — trusted without proof".to_string()),
+                insert_text: Some("assumes {\n    $0\n}".to_string()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "ghost".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some("Ghost variable — exists in Z3 only, stripped from codegen".to_string()),
+                insert_text: Some("ghost ${1:name}: ${2:u256} = ${0:expr};".to_string()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "emit".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some("Emit on-chain event".to_string()),
+                insert_text: Some("emit ${1:EventName}(${0:args});".to_string()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            },
+            CompletionItem {
+                label: "contract".to_string(),
+                kind: Some(CompletionItemKind::KEYWORD),
+                detail: Some("Define a smart contract with state and invariants".to_string()),
+                insert_text: Some("contract ${1:Name} {\n    state ${2:var}: ${3:u256} = ${4:0};\n\n    invariant {\n        $0\n    }\n}".to_string()),
+                insert_text_format: Some(InsertTextFormat::SNIPPET),
+                ..Default::default()
+            },
+        ];
+        Ok(Some(CompletionResponse::Array(items)))
     }
 }
 

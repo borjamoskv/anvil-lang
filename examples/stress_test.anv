@@ -1,8 +1,8 @@
 contract StressTestEngine {
-    pool_balance: u64 = 1000000;
-    total_debt: u64 = 500000;
+    state pool_balance: u64 = 1000000;
+    state total_debt: u64 = 500000;
     
-    where {
+    invariant {
         // C5-REAL Global Invariant: Solvency is non-negotiable
         pool_balance >= total_debt
     }

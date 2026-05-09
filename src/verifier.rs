@@ -32,6 +32,8 @@ pub struct VerifyResult {
     pub duration_ms: f64,
     /// SHA3-256 of the solver assertion set — cryptographic anchor for CORTEX provenance.
     pub proof_hash: String,
+    /// Non-fatal warnings (e.g., approximated invariants, uninterpreted functions)
+    pub warnings: Vec<String>,
 }
 
 pub fn verify_program(program: &Program, type_env: &TypeEnv) -> Vec<VerifyResult> {
@@ -296,6 +298,7 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
         counterexample,
         duration_ms: start.elapsed().as_secs_f64() * 1000.0,
         proof_hash,
+        warnings: Vec::new(),
     };
 
     if result.verified {
@@ -536,7 +539,7 @@ fn invariant_to_z3_with_current<'ctx>(
 }
 
 // Convert an Anvil Expr (used as a condition) to a Z3 Bool
-// Handles comparisons like `counter > 0`, `i <= n`
+// Handles comparisons like `counter > 0`, `i <= n`, and identifier-based conditions
 fn condition_to_z3<'ctx>(
     ctx: &'ctx Context, expr: &Expr, vars: &HashMap<String, Int<'ctx>>,
 ) -> Option<Bool<'ctx>> {
@@ -570,6 +573,20 @@ fn condition_to_z3<'ctx>(
             }
         },
         Expr::BoolLit(b) => Some(Bool::from_bool(ctx, *b)),
+        Expr::Ident(name) => {
+            // Boolean identifier: treat as `name != 0`
+            if let Some(var) = vars.get(name.as_str()) {
+                let zero = Int::from_i64(ctx, 0);
+                Some(var._eq(&zero).not())
+            } else {
+                // Unknown boolean — create as fresh Bool constant
+                Some(Bool::new_const(ctx, name.as_str()))
+            }
+        },
+        Expr::UnaryOp { op: UnaryOp::Not, operand } => {
+            let inner = condition_to_z3(ctx, operand, vars)?;
+            Some(inner.not())
+        },
         _ => None,
     }
 }
@@ -587,6 +604,19 @@ fn inject_type_constraints<'ctx>(
 ) {
     let zero = Int::from_i64(ctx, 0);
 
+    // Precompute big-integer upper bound strings for types > 63 bits
+    fn upper_bound_str(bits: u32) -> Option<String> {
+        match bits {
+            8 => Some("256".to_string()),
+            16 => Some("65536".to_string()),
+            32 => Some("4294967296".to_string()),
+            64 => Some("18446744073709551616".to_string()),
+            128 => Some("340282366920938463463374607431768211456".to_string()),
+            256 => Some("115792089237316195423570985008687907853269984665640564039457584007913129639936".to_string()),
+            _ => None,
+        }
+    }
+
     for constraint in &type_env.constraints {
         // Apply to pre-state variable
         if let Some(pre_var) = pre_vars.get(&constraint.var_name) {
@@ -595,14 +625,10 @@ fn inject_type_constraints<'ctx>(
                     solver.assert(&pre_var.ge(&zero));
                 }
                 ConstraintKind::UpperBound { bits } => {
-                    // For bits <= 64, use i64 representation
-                    // For larger, use string-based big integer
-                    if *bits <= 63 {
-                        let upper = Int::from_i64(ctx, 1i64 << bits);
+                    if let Some(bound_str) = upper_bound_str(*bits) {
+                        let upper = Int::from_str(ctx, &bound_str).unwrap();
                         solver.assert(&pre_var.lt(&upper));
                     }
-                    // For u64/u128/u256: the non-negative constraint is sufficient
-                    // for Z3 Int semantics — overflow is caught by postcondition checking
                 }
                 ConstraintKind::SignedBound { bits } => {
                     if *bits <= 64 {
@@ -623,8 +649,8 @@ fn inject_type_constraints<'ctx>(
                     solver.assert(&post_var.ge(&zero));
                 }
                 ConstraintKind::UpperBound { bits } => {
-                    if *bits <= 63 {
-                        let upper = Int::from_i64(ctx, 1i64 << bits);
+                    if let Some(bound_str) = upper_bound_str(*bits) {
+                        let upper = Int::from_str(ctx, &bound_str).unwrap();
                         solver.assert(&post_var.lt(&upper));
                     }
                 }
@@ -648,19 +674,104 @@ fn expr_to_z3<'ctx>(
     ctx: &'ctx Context, expr: &Expr, vars: &HashMap<String, Int<'ctx>>,
 ) -> Option<Int<'ctx>> {
     match expr {
-        Expr::IntLit(n) => Some(Int::from_i64(ctx, *n as i64)),
+        Expr::IntLit(n) => {
+            // Handle large literals via string representation
+            if *n >= i64::MIN as i128 && *n <= i64::MAX as i128 {
+                Some(Int::from_i64(ctx, *n as i64))
+            } else {
+                Some(Int::from_str(ctx, &n.to_string()).unwrap_or_else(|| Int::from_i64(ctx, 0)))
+            }
+        },
+        Expr::BoolLit(b) => {
+            // Encode booleans as integers: true=1, false=0
+            Some(Int::from_i64(ctx, if *b { 1 } else { 0 }))
+        },
         Expr::Ident(name) => vars.get(name.trim()).cloned(),
         Expr::BinOp { left, op, right } => {
-            let l = expr_to_z3(ctx, left, vars)?;
-            let r = expr_to_z3(ctx, right, vars)?;
-            Some(match op {
-                BinOp::Add => Int::add(ctx, &[&l, &r]),
-                BinOp::Sub => Int::sub(ctx, &[&l, &r]),
-                BinOp::Mul => Int::mul(ctx, &[&l, &r]),
-                BinOp::Div => l.div(&r),
-                BinOp::Mod => l.rem(&r),
+            match op {
+                // Arithmetic operations
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                    let l = expr_to_z3(ctx, left, vars)?;
+                    let r = expr_to_z3(ctx, right, vars)?;
+                    Some(match op {
+                        BinOp::Add => Int::add(ctx, &[&l, &r]),
+                        BinOp::Sub => Int::sub(ctx, &[&l, &r]),
+                        BinOp::Mul => Int::mul(ctx, &[&l, &r]),
+                        BinOp::Div => l.div(&r),
+                        BinOp::Mod => l.rem(&r),
+                        _ => unreachable!(),
+                    })
+                },
+                // Comparison/logical operations → encode as 0/1 integer
+                BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt
+                | BinOp::Lte | BinOp::Gte | BinOp::And | BinOp::Or => {
+                    // These produce boolean results; encode as if-then-else: cond ? 1 : 0
+                    let one = Int::from_i64(ctx, 1);
+                    let z = Int::from_i64(ctx, 0);
+                    match op {
+                        BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt
+                        | BinOp::Lte | BinOp::Gte => {
+                            let l = expr_to_z3(ctx, left, vars)?;
+                            let r = expr_to_z3(ctx, right, vars)?;
+                            let cond = match op {
+                                BinOp::Eq => l._eq(&r),
+                                BinOp::Neq => l._eq(&r).not(),
+                                BinOp::Lt => l.lt(&r),
+                                BinOp::Gt => l.gt(&r),
+                                BinOp::Lte => l.le(&r),
+                                BinOp::Gte => l.ge(&r),
+                                _ => unreachable!(),
+                            };
+                            Some(cond.ite(&one, &z))
+                        },
+                        BinOp::And => {
+                            let l = expr_to_z3(ctx, left, vars)?;
+                            let r = expr_to_z3(ctx, right, vars)?;
+                            let l_bool = l._eq(&z).not();
+                            let r_bool = r._eq(&z).not();
+                            let both = Bool::and(ctx, &[&l_bool, &r_bool]);
+                            Some(both.ite(&one, &z))
+                        },
+                        BinOp::Or => {
+                            let l = expr_to_z3(ctx, left, vars)?;
+                            let r = expr_to_z3(ctx, right, vars)?;
+                            let l_bool = l._eq(&z).not();
+                            let r_bool = r._eq(&z).not();
+                            let either = Bool::or(ctx, &[&l_bool, &r_bool]);
+                            Some(either.ite(&one, &z))
+                        },
+                        _ => None,
+                    }
+                },
+            }
+        },
+        Expr::UnaryOp { op, operand } => {
+            let val = expr_to_z3(ctx, operand, vars)?;
+            match op {
+                UnaryOp::Neg => Some(Int::sub(ctx, &[&Int::from_i64(ctx, 0), &val])),
+                UnaryOp::Not => {
+                    let z = Int::from_i64(ctx, 0);
+                    let one = Int::from_i64(ctx, 1);
+                    let is_zero = val._eq(&z);
+                    Some(is_zero.ite(&one, &z))
+                },
+            }
+        },
+        Expr::FnCall { name, args } => {
+            // Uninterpreted function: create a fresh Z3 constant
+            // This is sound (conservative) — the function could return any value
+            let fresh_name = format!("__fn_{}_{}", name, args.len());
+            Some(Int::new_const(ctx, fresh_name.as_str()))
+        },
+        Expr::FieldAccess { object, field } => {
+            // Field access: encode as {object}_{field} variable lookup
+            let obj_name = match object.as_ref() {
+                Expr::Ident(n) => n.clone(),
                 _ => return None,
-            })
+            };
+            let composite = format!("{}_{}", obj_name, field);
+            vars.get(&composite).cloned()
+                .or_else(|| Some(Int::new_const(ctx, composite.as_str())))
         },
         _ => None,
     }
@@ -776,10 +887,26 @@ fn inv_term_to_z3<'ctx>(
         },
         InvTerm::FieldAccess { object, field, is_post } => {
             let n = format!("{}_{}", object, field);
-            if *is_post { Some(Int::new_const(ctx, format!("{}_post", n).as_str())) }
-            else { Some(Int::new_const(ctx, n.as_str())) }
+            if *is_post {
+                post_vars.get(&n).cloned()
+                    .or_else(|| Some(Int::new_const(ctx, format!("{}_post", n).as_str())))
+            } else {
+                pre_vars.get(&n).cloned()
+                    .or_else(|| Some(Int::new_const(ctx, n.as_str())))
+            }
         },
-        InvTerm::FnCall { .. } => None,
+        InvTerm::FnCall { name, args } => {
+            // Uninterpreted function in invariant context.
+            // Encode as a Z3 uninterpreted function applied to its arguments.
+            // For now, use a fresh constant per unique call signature (sound approximation).
+            let arg_strs: Vec<String> = args.iter().enumerate().map(|(i, arg)| {
+                inv_term_to_z3(ctx, arg, pre_vars, post_vars)
+                    .map(|v| format!("{}", v))
+                    .unwrap_or_else(|| format!("arg{}", i))
+            }).collect();
+            let key = format!("__inv_fn_{}_{}", name, arg_strs.join("_"));
+            Some(Int::new_const(ctx, key.as_str()))
+        },
     }
 }
 

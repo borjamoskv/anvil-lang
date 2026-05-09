@@ -286,11 +286,66 @@ fn gen_llvm_cond(expr: &Expr, mut vreg: usize, out: &mut String) -> (String, usi
 fn gen_llvm_expr(expr: &Expr, vreg: usize, out: &mut String) -> (String, usize) {
     match expr {
         Expr::IntLit(n) => (n.to_string(), vreg),
+        Expr::BoolLit(b) => (if *b { "1" } else { "0" }.to_string(), vreg),
         Expr::Ident(name) => {
             // Identifier values must be loaded from their alloca pointer
             let load_reg = vreg;
             out.push_str(&format!("  %{} = load i64, ptr %_{}\n", load_reg, name));
             (format!("%{}", load_reg), vreg + 1)
+        },
+        Expr::BinOp { left, op, right } => {
+            let (l_str, next) = gen_llvm_expr(left, vreg, out);
+            let (r_str, next2) = gen_llvm_expr(right, next, out);
+            let llvm_op = match op {
+                BinOp::Add => "add",
+                BinOp::Sub => "sub",
+                BinOp::Mul => "mul",
+                BinOp::Div => "udiv",
+                BinOp::Mod => "urem",
+                _ => {
+                    // Comparison/logical ops — use icmp
+                    let cmp_op = match op {
+                        BinOp::Eq => "eq", BinOp::Neq => "ne",
+                        BinOp::Lt => "slt", BinOp::Gt => "sgt",
+                        BinOp::Lte => "sle", BinOp::Gte => "sge",
+                        _ => "ne",
+                    };
+                    out.push_str(&format!("  %{} = icmp {} i64 {}, {}\n", next2, cmp_op, l_str, r_str));
+                    let cmp_reg = next2;
+                    let ext_reg = cmp_reg + 1;
+                    out.push_str(&format!("  %{} = zext i1 %{} to i64\n", ext_reg, cmp_reg));
+                    return (format!("%{}", ext_reg), ext_reg + 1);
+                }
+            };
+            out.push_str(&format!("  %{} = {} i64 {}, {}\n", next2, llvm_op, l_str, r_str));
+            (format!("%{}", next2), next2 + 1)
+        },
+        Expr::UnaryOp { op, operand } => {
+            let (val_str, next) = gen_llvm_expr(operand, vreg, out);
+            match op {
+                UnaryOp::Neg => {
+                    out.push_str(&format!("  %{} = sub i64 0, {}\n", next, val_str));
+                    (format!("%{}", next), next + 1)
+                },
+                UnaryOp::Not => {
+                    out.push_str(&format!("  %{} = icmp eq i64 {}, 0\n", next, val_str));
+                    let ext = next + 1;
+                    out.push_str(&format!("  %{} = zext i1 %{} to i64\n", ext, next));
+                    (format!("%{}", ext), ext + 1)
+                },
+            }
+        },
+        Expr::FnCall { name, args } => {
+            // Emit call instruction
+            let mut arg_strs = Vec::new();
+            let mut current_vreg = vreg;
+            for arg in args {
+                let (a_str, next) = gen_llvm_expr(arg, current_vreg, out);
+                arg_strs.push(format!("i64 {}", a_str));
+                current_vreg = next;
+            }
+            out.push_str(&format!("  %{} = call i64 @{}({})\n", current_vreg, name, arg_strs.join(", ")));
+            (format!("%{}", current_vreg), current_vreg + 1)
         },
         Expr::FieldAccess { object, field } => {
             // Simplified getelementptr simulation
@@ -300,10 +355,10 @@ fn gen_llvm_expr(expr: &Expr, vreg: usize, out: &mut String) -> (String, usize) 
                 _ => "unknown".to_string(),
             };
             out.push_str(&format!("  ; getelementptr simulation for {}.{}\n", obj_name, field));
-            out.push_str(&format!("  %{} = load ptr, ptr %_{}\n", load_reg, obj_name)); // Just a stub
+            out.push_str(&format!("  %{} = load i64, ptr %_{}_{}\n", load_reg, obj_name, field));
             (format!("%{}", load_reg), vreg + 1)
         },
-        _ => ("0".to_string(), vreg) // Placeholder for complex exprs
+        _ => ("0".to_string(), vreg) // Remaining edge cases
     }
 }
 

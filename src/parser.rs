@@ -107,6 +107,22 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type, String> {
             let inner_ty = parse_type(inner.into_inner().next().unwrap())?;
             Ok(Type::Array(Box::new(inner_ty)))
         },
+        Rule::map_type => {
+            let mut inners = inner.into_inner();
+            let key_ty = parse_type(inners.next().unwrap())?;
+            let val_ty = parse_type(inners.next().unwrap())?;
+            Ok(Type::Map(Box::new(key_ty), Box::new(val_ty)))
+        },
+        Rule::option_type => {
+            let inner_ty = parse_type(inner.into_inner().next().unwrap())?;
+            Ok(Type::Option(Box::new(inner_ty)))
+        },
+        Rule::result_type => {
+            let mut inners = inner.into_inner();
+            let ok_ty = parse_type(inners.next().unwrap())?;
+            let err_ty = parse_type(inners.next().unwrap())?;
+            Ok(Type::Result(Box::new(ok_ty), Box::new(err_ty)))
+        },
         _ => Ok(Type::Unit),
     }
 }

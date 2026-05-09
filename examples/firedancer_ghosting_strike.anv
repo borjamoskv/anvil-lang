@@ -23,16 +23,17 @@ where {
 
     // 3. Estado del sistema durante la consulta
     last_publish_ptr == 1,              // El puntero dice "mira en el ROOT"
-    txn_a_records_migrated == false,    // Pero el ROOT aún no tiene los datos nuevos
+    txn_a_records_migrated == 0,    // Pero el ROOT aún no tiene los datos nuevos
 
     // 4. Mecánica de Lectura Sucia (Dirty Read)
-    // Si last_publish == 1 y records_migrated == false, el lector obtiene NULL o datos viejos
-    stale_read_occurred == (last_publish_ptr == 1 && txn_a_records_migrated == false),
+    // If last_publish == 1 and records_migrated == false, the reader gets stale data
+    // These conditions combined mean a dirty read has occurred
+    last_publish_ptr == 1 && txn_a_records_migrated == 0,
 
     // POSTCONDITION (Consensus Strike):
-    // Z3 demostrará que existe una ventana temporal donde stale_read_occurred es TRUE,
-    // rompiendo la garantía de consistencia de Solana/Firedancer.
-    stale_read_occurred' == false
+    // Z3 will prove a temporal window where stale_read_occurred is TRUE,
+    // breaking Solana/Firedancer's consistency guarantee.
+    stale_read_occurred' == 0
 } {
     // Evolución de la máquina de estados
     return stale_read_occurred;

@@ -1,0 +1,44 @@
+// ============================================================
+// K2 LENDING: CLOSE FACTOR BYPASS VERIFICATION
+// Proving that O(n) iterative calls collapse the 50% cap.
+// ============================================================
+
+contract K2Router {
+    // We model the debt as a state variable that decreases
+    fn liquidation_call(mut debt: u64, amount: u64, close_factor: u64) -> u64
+        where {
+            debt > 0,
+            close_factor == 50,
+            // The protocol's local check:
+            amount <= debt * close_factor / 100,
+            // The INVARIANT we want to protect (but is violated):
+            // After one or more calls in a TX, the total liquidated 
+            // should not exceed 50% of the INITIAL debt.
+            // Here we model a single call and its effect on the state.
+            debt' == debt - amount
+        }
+    {
+        debt -= amount;
+        return debt;
+    }
+}
+
+// To prove the bypass, we model a sequence of two calls
+fn iterative_liquidation_attack(initial_debt: u64) -> u64
+    where {
+        initial_debt == 1000,
+        // We want to prove that we can liquidate more than 500 (50%)
+        total_liquidated' <= 500 
+    }
+{
+    // First call: liquidate 50% (500)
+    let debt_1 = initial_debt - 500;
+    
+    // Second call: liquidate 50% of the REMAINDER (250)
+    // Local check passes: 250 <= 500 * 50 / 100
+    let debt_2 = debt_1 - 250;
+    
+    let total_liquidated = initial_debt - debt_2; // 750
+    
+    return total_liquidated;
+}
