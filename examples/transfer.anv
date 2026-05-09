@@ -11,7 +11,7 @@
 // 4. Sender balance decreases by exactly the amount
 // 5. Receiver balance increases by exactly the amount
 
-fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64
+fn transfer(mut sender_balance: u64, mut receiver_balance: u64, amount: u64) -> u64
     where {
         amount > 0,
         sender_balance >= amount,
@@ -32,7 +32,7 @@ fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64
 // the close factor limit.
 // ============================================================
 
-fn liquidate(debt: u64, repay_amount: u64, close_factor: u64, total_repaid: u64) -> u64
+fn liquidate(debt: u64, repay_amount: u64, close_factor: u64, mut total_repaid: u64) -> u64
     where {
         repay_amount > 0,
         close_factor > 0,
