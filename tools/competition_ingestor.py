@@ -1,9 +1,7 @@
 import os
 import sys
 import subprocess
-import urllib.request
-import json
-from datetime import datetime
+from _cortex_common import BASE, BANNER
 
 # ====================================================================
 # [C5-REAL] CORTEX-Persist: Audit Competition Ingestor & Workspace Forge
@@ -13,7 +11,7 @@ from datetime import datetime
 # entorno de verificación formal en Anvil/Z3.
 # ====================================================================
 
-COMPETITIONS_DIR = "/Users/borjafernandezangulo/10_PROJECTS/cortex-bounties/competitions"
+COMPETITIONS_DIR = os.path.join(BASE, "cortex-bounties", "competitions")
 
 def setup_workspace():
     if not os.path.exists(COMPETITIONS_DIR):
@@ -63,9 +61,9 @@ else:
         print(f"[+] Plantilla Anvil/Z3 forjada en: {template_path}")
 
 def run():
-    print("==========================================================")
+    print(BANNER)
     print("🐍 [OUROBOROS] CORTEX Audit Competition Pipeline Initiated")
-    print("==========================================================")
+    print(BANNER)
     
     setup_workspace()
     
@@ -84,12 +82,12 @@ def run():
     target_dir = clone_target_repo(repo_url, target_name)
     forge_anvil_template(target_name, target_dir)
     
-    print("\n==========================================================")
+    print(f"\n{BANNER}")
     print("🛡️ [C5-REAL] PIPELINE DE AUDITORÍA DESPLEGADO")
     print(f"Target: {target_name}")
     print(f"Path: {target_dir}")
     print("Acción Siguiente: Abre el workspace, revisa los contratos e inicializa el modelo Z3.")
-    print("==========================================================")
+    print(BANNER)
 
 if __name__ == "__main__":
     run()

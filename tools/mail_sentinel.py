@@ -11,6 +11,7 @@ import subprocess
 import os
 import sys
 from datetime import datetime
+from _cortex_common import BANNER
 
 # --- Config ---
 GMAIL_USER = os.environ.get("GMAIL_USER", "moskvtoken@gmail.com")
@@ -89,9 +90,9 @@ def check_for_reply():
 
 def main():
     if not GMAIL_APP_PASSWORD:
-        print("=" * 60)
+        print(BANNER)
         print("CORTEX MAIL SENTINEL — Setup Required")
-        print("=" * 60)
+        print(BANNER)
         print()
         print("Need a Gmail App Password to monitor inbox.")
         print("1. Go to: https://myaccount.google.com/apppasswords")
@@ -102,12 +103,12 @@ def main():
         print()
         sys.exit(1)
     
-    print("=" * 60)
+    print(BANNER)
     print(f"  CORTEX MAIL SENTINEL v1.0")
     print(f"  Watching: {WATCH_SENDER} ({WATCH_NAME})")
     print(f"  Interval: {CHECK_INTERVAL_SECONDS}s")
     print(f"  Account: {GMAIL_USER}")
-    print("=" * 60)
+    print(BANNER)
     
     # Initial notification
     notify_macos(
@@ -128,10 +129,9 @@ def main():
                 # macOS notification
                 notify_macos(
                     f"📬 {WATCH_NAME} ha respondido",
-                    f"{e['subject']}"
+                    e['subject']
                 )
-                # Speak it
-                say_macos(f"Borja, Sergio Alonso ha respondido al email sobre Anvil")
+                say_macos(f"Borja, {WATCH_NAME} ha respondido al email sobre Anvil")
         else:
             print(f"[{now}] No new emails from {WATCH_NAME}", end="\r")
         

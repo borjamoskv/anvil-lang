@@ -18,7 +18,6 @@ import json
 import re
 import sys
 import os
-import hashlib
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Optional
@@ -268,9 +267,6 @@ def _assess_viability(
         return ExploitViability.HIGH
     
     # Custom/None → Unknown, needs manual review
-    if primary in (OracleType.CUSTOM, OracleType.NONE_DETECTED):
-        return ExploitViability.MEDIUM
-    
     return ExploitViability.MEDIUM
 
 

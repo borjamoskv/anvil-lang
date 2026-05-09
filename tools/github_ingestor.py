@@ -1,46 +1,55 @@
-import urllib.request
+"""
+github_ingestor.py — CORTEX-Persist GitHub Source Ingestor (C5-REAL)
+
+Fetches contract source code from GitHub and writes it to the targets/ dir.
+Tries 'main' first, falls back to 'master'.
+"""
+
 import os
+import urllib.request
+import urllib.error
+from _cortex_common import BASE, BANNER
 
-print("🐍 [OUROBOROS] CORTEX-Persist GitHub Ingestor C5-REAL")
-print("==================================================")
+TARGETS_DIR = os.path.join(BASE, "anvil-lang", "targets")
 
-def fetch_github_file(owner, repo, path):
-    print(f"[*] Extrayendo código de GitHub: {owner}/{repo} -> {path}")
-    url = f"https://raw.githubusercontent.com/{owner}/{repo}/main/{path}"
-    
+
+def _fetch_raw(owner: str, repo: str, path: str, branch: str) -> str | None:
+    """Fetch raw file content from GitHub. Returns text or None on failure."""
+    url = (
+        f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+    )
     try:
-        req = urllib.request.Request(url)
-        with urllib.request.urlopen(req) as response:
-            source_code = response.read().decode('utf-8')
-            
-            filename = os.path.basename(path)
-            target_file = f"targets/{filename}"
-            os.makedirs("targets", exist_ok=True)
-            
-            with open(target_file, "w") as f:
-                f.write(source_code)
-                
-            print(f"✅ [EXTRACCIÓN COMPLETA] Código fuente guardado en {target_file}")
-            print(f"⚖️ Tamaño de la entropía: {len(source_code)} bytes")
-            print("==================================================")
-    except Exception as e:
-        print(f"[*] Buscando en la rama 'master'...")
-        url = f"https://raw.githubusercontent.com/{owner}/{repo}/master/{path}"
-        try:
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req) as response:
-                source_code = response.read().decode('utf-8')
-                filename = os.path.basename(path)
-                target_file = f"targets/{filename}"
-                os.makedirs("targets", exist_ok=True)
-                with open(target_file, "w") as f:
-                    f.write(source_code)
-                print(f"✅ [EXTRACCIÓN COMPLETA] Código fuente guardado en {target_file}")
-                print(f"⚖️ Tamaño de la entropía: {len(source_code)} bytes")
-                print("==================================================")
-        except Exception as e2:
-            print(f"❌ Fallo crítico en red: {e2}")
+        with urllib.request.urlopen(urllib.request.Request(url)) as resp:
+            return resp.read().decode("utf-8")
+    except urllib.error.URLError:
+        return None
+
+
+def fetch_github_file(owner: str, repo: str, path: str) -> None:
+    """Try 'main' then 'master'. Write result to targets/."""
+    print(f"[*] Fetching: {owner}/{repo} → {path}")
+
+    source = _fetch_raw(owner, repo, path, "main")
+    if source is None:
+        print("[*] 'main' not found — trying 'master'...")
+        source = _fetch_raw(owner, repo, path, "master")
+
+    if source is None:
+        print(f"[!] Fetch failed for {owner}/{repo}/{path}")
+        return
+
+    os.makedirs(TARGETS_DIR, exist_ok=True)
+    filename = os.path.basename(path)
+    target_file = os.path.join(TARGETS_DIR, filename)
+
+    with open(target_file, "w") as f:
+        f.write(source)
+
+    print(f"[+] Saved to {target_file} ({len(source):,} bytes)")
+
 
 if __name__ == "__main__":
-    # Extrayendo el contrato principal del protocolo Pendle Finance / Uniswap
+    print(BANNER)
+    print("[OUROBOROS] CORTEX-Persist GitHub Ingestor (C5-REAL)")
+    print(BANNER)
     fetch_github_file("Uniswap", "v2-core", "contracts/UniswapV2Pair.sol")
