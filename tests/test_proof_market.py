@@ -12,9 +12,9 @@ URL = f"http://127.0.0.1:{PORT}/v1/prove"
 def main():
     print("🚀 Booting Zero-Dependency Proof Market Oracle for Integration Test...")
     
-    # Absolute path to services/api/main.py
-    api_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../services/api"))
-    oracle_process = subprocess.Popen(["python3", "main.py"], cwd=api_dir)
+    # Absolute path to services/proof-market Rust binary
+    rust_api_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../services/proof-market"))
+    oracle_process = subprocess.Popen(["./target/debug/proof-market"], cwd=rust_api_dir)
     
     # Wait for the Oracle to boot
     time.sleep(2)
