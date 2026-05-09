@@ -1,128 +1,116 @@
 use axum::{
     routing::post,
+    Router,
+    Json,
+    response::IntoResponse,
     http::StatusCode,
-    Json, Router,
 };
 use serde::{Deserialize, Serialize};
 use std::process::Command;
-use std::time::SystemTime;
-use std::fs;
-use std::path::Path;
+use std::io::Write;
+use tempfile::NamedTempFile;
 use sha2::{Sha256, Digest};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Deserialize)]
 struct ProveRequest {
-    source_code: String,
+    client_id: String,
     stripe_session_id: String,
+    source_code: String,
 }
 
 #[derive(Serialize)]
 struct ProveResponse {
     status: String,
-    execution_time_ms: u128,
+    execution_time_ms: f64,
     certificate_hash: Option<String>,
     z3_output: String,
 }
 
-#[derive(Serialize)]
-struct ErrorResponse {
-    detail: String,
-}
-
 #[tokio::main]
 async fn main() {
-    println!("==================================================");
-    println!("🛡️  CORTEX Proof Market: High-Exergy VaaS Oracle");
-    println!("==================================================");
-    println!("[*] Initializing Axum HTTP Socket on 0.0.0.0:8000...");
-    
+    println!("==========================================================");
+    println!("🐍 [ANVIL] CORTEX-Persist: Proof Market Oracle (Axum/Rust)");
+    println!("==========================================================");
+    println!("[C5-REAL] Inicializando oráculo criptográfico en 127.0.0.1:8000");
+
     let app = Router::new().route("/v1/prove", post(prove_handler));
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:8000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:8000").await.unwrap();
     axum::serve(listener, app).await.unwrap();
 }
 
-async fn prove_handler(
-    Json(payload): Json<ProveRequest>,
-) -> Result<Json<ProveResponse>, (StatusCode, Json<ErrorResponse>)> {
-    
-    // 1. Billing Validation
+async fn prove_handler(Json(payload): Json<ProveRequest>) -> impl IntoResponse {
+    let start_time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis();
+
+    if payload.source_code.len() > 50 * 1024 {
+        return (StatusCode::PAYLOAD_TOO_LARGE, Json(ProveResponse {
+            status: "REJECTED".to_string(),
+            execution_time_ms: 0.0,
+            certificate_hash: None,
+            z3_output: "Payload Too Large: Exceeds 50KB strict limit".to_string(),
+        }));
+    }
+
     if !payload.stripe_session_id.starts_with("cs_") {
-        return Err((
-            StatusCode::PAYMENT_REQUIRED,
-            Json(ErrorResponse {
-                detail: "Payment Required: Invalid Stripe Session".to_string(),
-            }),
-        ));
+        return (StatusCode::PAYMENT_REQUIRED, Json(ProveResponse {
+            status: "REJECTED".to_string(),
+            execution_time_ms: 0.0,
+            certificate_hash: None,
+            z3_output: "Invalid Stripe Session. Exergy requires capital.".to_string(),
+        }));
     }
 
-    let start_time = SystemTime::now();
+    let mut temp_file = NamedTempFile::new().unwrap();
+    write!(temp_file, "{}", payload.source_code).unwrap();
+    let temp_path = temp_file.path().to_str().unwrap().to_string();
 
-    // 2. Ephemeral Sandboxing
-    let temp_id = format!("anv_{}", start_time.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros());
-    let temp_path = format!("/tmp/{}.anv", temp_id);
+    // El binario maestro de Anvil (compilado vía Cargo previamente)
+    let cmd_path = "../../target/debug/anvil";
     
-    if let Err(e) = fs::write(&temp_path, &payload.source_code) {
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ErrorResponse {
-                detail: format!("Failed to create sandbox: {}", e),
-            }),
-        ));
-    }
-
-    // 3. Z3 Execution Pipeline
-    // Resolve workspace root
-    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().parent().unwrap();
-    let anvil_bin = workspace_root.join("target/debug/anvil");
-
-    let output = Command::new(&anvil_bin)
+    let output = Command::new(cmd_path)
         .arg("check")
         .arg(&temp_path)
-        .current_dir(workspace_root)
         .output();
-        
-    let _ = fs::remove_file(&temp_path); // Cleanup
 
-    let execution_time_ms = start_time.elapsed().unwrap().as_millis();
+    let exec_time = (SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis() - start_time) as f64;
 
     match output {
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr).to_string();
             let stdout = String::from_utf8_lossy(&out.stdout).to_string();
-            let combined_output = format!("{}{}", stdout, stderr);
+            let combined = if !stderr.is_empty() { stderr } else { stdout };
 
-            // 4. Axiomatic Resolution
             if out.status.success() {
-                // SATISFIED (Safe)
-                let payload_to_hash = format!("{}|{}|ANVIL_MASTER_KEY", payload.source_code, execution_time_ms);
+                // Generar hash de certificación inmutable
                 let mut hasher = Sha256::new();
-                hasher.update(payload_to_hash);
-                let cert_hash = hex::encode(hasher.finalize());
+                let hash_payload = format!("{}|{}|ANVIL_MASTER_KEY", payload.source_code, start_time);
+                hasher.update(hash_payload.as_bytes());
+                let result = hasher.finalize();
+                let cert_hash = format!("anv_cert_{}", hex::encode(result));
 
-                Ok(Json(ProveResponse {
+                (StatusCode::OK, Json(ProveResponse {
                     status: "PROVEN_SAFE".to_string(),
-                    execution_time_ms,
-                    certificate_hash: Some(format!("anv_cert_{}", cert_hash)),
-                    z3_output: "All postconditions proven. Zero trust required.".to_string(),
+                    execution_time_ms: exec_time,
+                    certificate_hash: Some(cert_hash),
+                    z3_output: combined,
                 }))
             } else {
-                // VULNERABLE
-                Ok(Json(ProveResponse {
+                (StatusCode::OK, Json(ProveResponse {
                     status: "VULNERABILITY_DETECTED".to_string(),
-                    execution_time_ms,
+                    execution_time_ms: exec_time,
                     certificate_hash: None,
-                    z3_output: combined_output,
+                    z3_output: combined,
                 }))
             }
-        }
+        },
         Err(e) => {
-            Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ErrorResponse {
-                    detail: format!("Engine execution failed: {}", e),
-                }),
-            ))
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ProveResponse {
+                status: "EXECUTION_ERROR".to_string(),
+                execution_time_ms: exec_time,
+                certificate_hash: None,
+                z3_output: format!("Failed to spawn Z3 Engine process: {}", e),
+            }))
         }
     }
 }
