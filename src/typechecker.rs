@@ -196,23 +196,19 @@ fn check_function(func: &FnDef, env: &mut TypeEnv) {
     check_block(&func.body, env, &func.name);
 
     // Verify return type matches body
-    if let Some(ref ret_ty) = func.return_type {
-        if let Some(last_stmt) = func.body.stmts.last() {
-            if let Stmt::Return(Some(expr)) = last_stmt {
-                let expr_ty = infer_expr_type(expr, env);
-                if let Some(ety) = &expr_ty {
-                    if !types_compatible(ety, ret_ty) {
-                        env.errors.push(TypeError {
-                            message: format!(
-                                "Return type mismatch in '{}': expected {}, got {}",
-                                func.name,
-                                format_type(ret_ty),
-                                format_type(ety)
-                            ),
-                            location: func.name.clone(),
-                        });
-                    }
-                }
+    if let (Some(ret_ty), Some(Stmt::Return(Some(expr)))) = (&func.return_type, func.body.stmts.last()) {
+        let expr_ty = infer_expr_type(expr, env);
+        if let Some(ety) = &expr_ty {
+            if !types_compatible(ety, ret_ty) {
+                env.errors.push(TypeError {
+                    message: format!(
+                        "Return type mismatch in '{}': expected {}, got {}",
+                        func.name,
+                        format_type(ret_ty),
+                        format_type(ety)
+                    ),
+                    location: func.name.clone(),
+                });
             }
         }
     }
@@ -370,43 +366,39 @@ fn check_overflow_safety(func: &FnDef, env: &mut TypeEnv) {
 
             // Check SubAssign on unsigned types — potential underflow
             if matches!(op, AssignOp::SubAssign) {
-                if let Some(ref ty) = target_ty {
-                    if is_unsigned(ty) {
-                        // Check if the invariants already guard against this
-                        let has_guard = func.invariants.iter().any(|inv| {
-                            invariant_guards_underflow(&inv.expr, &target_name, value)
-                        });
+                if let Some(ty) = target_ty.as_ref().filter(|t| is_unsigned(t)) {
+                    // Check if the invariants already guard against this
+                    let has_guard = func.invariants.iter().any(|inv| {
+                        invariant_guards_underflow(&inv.expr, &target_name, value)
+                    });
 
-                        if !has_guard {
-                            env.warnings.push(TypeWarning {
-                                message: format!(
-                                    "Potential underflow: '{} -= ...' on {} without explicit guard. \
-                                     Consider adding '{} >= <value>' to where clause.",
-                                    target_name,
-                                    format_type(ty),
-                                    target_name,
-                                ),
-                                location: func.name.clone(),
-                            });
-                        }
+                    if !has_guard {
+                        env.warnings.push(TypeWarning {
+                            message: format!(
+                                "Potential underflow: '{} -= ...' on {} without explicit guard. \
+                                 Consider adding '{} >= <value>' to where clause.",
+                                target_name,
+                                format_type(ty),
+                                target_name,
+                            ),
+                            location: func.name.clone(),
+                        });
                     }
                 }
             }
 
             // Check AddAssign on unsigned types — potential overflow
             if matches!(op, AssignOp::AddAssign) {
-                if let Some(ref ty) = target_ty {
-                    if is_unsigned(ty) {
-                        env.warnings.push(TypeWarning {
-                            message: format!(
-                                "Potential overflow: '{} += ...' on {}. \
-                                 Post-state will be bounded by Z3 type constraints.",
-                                target_name,
-                                format_type(ty),
-                            ),
-                            location: func.name.clone(),
-                        });
-                    }
+                if let Some(ty) = target_ty.as_ref().filter(|t| is_unsigned(t)) {
+                    env.warnings.push(TypeWarning {
+                        message: format!(
+                            "Potential overflow: '{} += ...' on {}. \
+                             Post-state will be bounded by Z3 type constraints.",
+                            target_name,
+                            format_type(ty),
+                        ),
+                        location: func.name.clone(),
+                    });
                 }
             }
         }

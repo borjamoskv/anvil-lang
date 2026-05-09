@@ -22,6 +22,7 @@ pub fn generate_rust(program: &Program) -> String {
         out.push('\n');
     }
 
+    out.push_str("\n#[allow(dead_code)]\nfn main() {}\n");
     out
 }
 

@@ -39,10 +39,8 @@ pub fn verify_program(program: &Program, type_env: &TypeEnv) -> Vec<VerifyResult
                 results.push(verify_function(f, type_env, &no_contract_invs));
             },
             Item::Contract(c) => {
-                for f in &c.functions {
-                    if !f.invariants.is_empty() || !c.invariants.is_empty() {
-                        results.push(verify_function(f, type_env, &c.invariants));
-                    }
+                for f in c.functions.iter().filter(|f| !f.invariants.is_empty() || !c.invariants.is_empty()) {
+                    results.push(verify_function(f, type_env, &c.invariants));
                 }
             },
             _ => {},
@@ -247,48 +245,44 @@ fn encode_body_effects<'ctx>(
     for stmt in &body.stmts {
         match stmt {
             Stmt::Assign { target, op, value } => {
-                if let LValue::Ident(name) = target {
-                    if let Some(current) = current_vars.get(name).cloned() {
-                        // Evaluate the RHS using current variable values (not pre!)
-                        let encoded = match op {
-                            AssignOp::Assign => expr_to_z3(ctx, value, &current_vars),
-                            AssignOp::AddAssign => expr_to_z3(ctx, value, &current_vars)
-                                .map(|v| Int::add(ctx, &[&current, &v])),
-                            AssignOp::SubAssign => expr_to_z3(ctx, value, &current_vars)
-                                .map(|v| Int::sub(ctx, &[&current, &v])),
-                            AssignOp::MulAssign => expr_to_z3(ctx, value, &current_vars)
-                                .map(|v| Int::mul(ctx, &[&current, &v])),
-                            AssignOp::DivAssign => expr_to_z3(ctx, value, &current_vars)
-                                .map(|v| current.div(&v)),
-                        };
+                if let Some(current) = match target {
+                    LValue::Ident(name) => current_vars.get(name).cloned().map(|c| (name, c)),
+                    _ => None,
+                } {
+                    let (name, current) = current;
+                    // Evaluate the RHS using current variable values (not pre!)
+                    let encoded = match op {
+                        AssignOp::Assign => expr_to_z3(ctx, value, &current_vars),
+                        AssignOp::AddAssign => expr_to_z3(ctx, value, &current_vars)
+                            .map(|v| Int::add(ctx, &[&current, &v])),
+                        AssignOp::SubAssign => expr_to_z3(ctx, value, &current_vars)
+                            .map(|v| Int::sub(ctx, &[&current, &v])),
+                        AssignOp::MulAssign => expr_to_z3(ctx, value, &current_vars)
+                            .map(|v| Int::mul(ctx, &[&current, &v])),
+                        AssignOp::DivAssign => expr_to_z3(ctx, value, &current_vars)
+                            .map(|v| current.div(&v)),
+                    };
 
-                        if let Some(result) = encoded {
-                            // Create intermediate SSA variable
-                            let counter = ssa_counters.entry(name.clone()).or_insert(0);
-                            *counter += 1;
+                    if let Some(result) = encoded {
+                        // Create intermediate SSA variable
+                        let counter = ssa_counters.entry(name.clone()).or_insert(0);
+                        *counter += 1;
 
-                            let ssa_name = format!("{}_ssa_{}", name, counter);
-                            let ssa_var = Int::new_const(ctx, ssa_name.as_str());
+                        let ssa_name = format!("{}_ssa_{}", name, counter);
+                        let ssa_var = Int::new_const(ctx, ssa_name.as_str());
 
-                            // Assert: ssa_var == computed_result
-                            solver.assert(&ssa_var._eq(&result));
-                            
-                            // HARDWARE BOUNDS: The silicon is finite.
-                            // We force Z3 to respect the u64 limits for all intermediate states.
-                            // If an overflow occurs mathematically, this assertion makes the path UNSAT,
-                            // or if we use this as a safety check, we can flag it.
-                            // For true overflow catching, we should model it with BitVectors, but 
-                            // bounding the Int is the first step.
-                            let zero = Int::from_i64(ctx, 0);
-                            // 2^64 as a string because it exceeds i64
-                            let u64_max = Int::from_str(ctx, "18446744073709551616").unwrap();
-                            solver.assert(&ssa_var.ge(&zero));
-                            solver.assert(&ssa_var.lt(&u64_max));
+                        // Assert: ssa_var == computed_result
+                        solver.assert(&ssa_var._eq(&result));
+                        
+                        // HARDWARE BOUNDS: The silicon is finite.
+                        let zero = Int::from_i64(ctx, 0);
+                        let u64_max = Int::from_str(ctx, "18446744073709551616").unwrap();
+                        solver.assert(&ssa_var.ge(&zero));
+                        solver.assert(&ssa_var.lt(&u64_max));
 
-                            // Update current value to the new SSA variable
-                            current_vars.insert(name.clone(), ssa_var);
-                            modified.insert(name.clone());
-                        }
+                        // Update current value to the new SSA variable
+                        current_vars.insert(name.clone(), ssa_var);
+                        modified.insert(name.clone());
                     }
                 }
             },

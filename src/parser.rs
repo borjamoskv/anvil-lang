@@ -16,17 +16,15 @@ pub fn parse_program(source: &str) -> Result<Program, String> {
         .map_err(|e| format!("Parse error:\n{}", e))?;
 
     let mut items = Vec::new();
-    for pair in pairs {
-        if pair.as_rule() == Rule::program {
-            for inner in pair.into_inner() {
-                match inner.as_rule() {
-                    Rule::fn_def => items.push(Item::Function(parse_fn_def(inner)?)),
-                    Rule::struct_def => items.push(Item::Struct(parse_struct_def(inner)?)),
-                    Rule::const_def => items.push(Item::Const(parse_const_def(inner)?)),
-                    Rule::contract_def => items.push(Item::Contract(parse_contract_def(inner)?)),
-                    Rule::EOI => {},
-                    _ => {},
-                }
+    for pair in pairs.filter(|p| p.as_rule() == Rule::program) {
+        for inner in pair.into_inner() {
+            match inner.as_rule() {
+                Rule::fn_def => items.push(Item::Function(parse_fn_def(inner)?)),
+                Rule::struct_def => items.push(Item::Struct(parse_struct_def(inner)?)),
+                Rule::const_def => items.push(Item::Const(parse_const_def(inner)?)),
+                Rule::contract_def => items.push(Item::Contract(parse_contract_def(inner)?)),
+                Rule::EOI => {},
+                _ => {},
             }
         }
     }
@@ -390,10 +388,8 @@ fn parse_while_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
         match inner.as_rule() {
             Rule::expr => condition = parse_expr(inner)?,
             Rule::where_clause => {
-                for wc in inner.into_inner() {
-                    if wc.as_rule() == Rule::invariant {
-                        invariants.push(parse_invariant(wc)?);
-                    }
+                for wc in inner.into_inner().filter(|p| p.as_rule() == Rule::invariant) {
+                    invariants.push(parse_invariant(wc)?);
                 }
             },
             Rule::block => body = parse_block(inner)?,
@@ -585,10 +581,8 @@ fn parse_contract_def(pair: pest::iterators::Pair<Rule>) -> Result<ContractDef, 
                         },
                         Rule::fn_def => functions.push(parse_fn_def(body_item)?),
                         Rule::invariant_block => {
-                            for inv in body_item.into_inner() {
-                                if inv.as_rule() == Rule::invariant {
-                                    invariants.push(parse_invariant(inv)?);
-                                }
+                            for inv in body_item.into_inner().filter(|p| p.as_rule() == Rule::invariant) {
+                                invariants.push(parse_invariant(inv)?);
                             }
                         },
                         _ => {},
