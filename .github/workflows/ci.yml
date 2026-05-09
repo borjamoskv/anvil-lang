@@ -55,8 +55,8 @@ jobs:
     - name: Autonomous Bug Bounty Scanner (C5-REAL)
       run: python3 tools/bounty_scanner.py
 
-    - name: Proof Market Execution - AMM Audit
-      run: python3 tests/test_proof_market_amm.py
-
-    - name: End-to-End Proof Market Verification - Vault
+    - name: Integration Test - Vault Proof Market
       run: python3 tests/test_proof_market.py
+
+    - name: Integration Test - AMM Vulnerability Market
+      run: python3 tests/test_proof_market_amm.py

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Anvil Proof Markets — Zero Runtime Checks</title>
+    <style>
+        :root {
+            --bg-color: #0A0A0A;
+            --text-color: #E0E0E0;
+            --accent-color: #2B3BE5;
+            --error-color: #E52B50;
+            --success-color: #00FF66;
+            --border-color: #333;
+            --font-mono: 'IBM Plex Mono', 'Menlo', 'Courier New', monospace;
+            --font-sans: 'Inter', system-ui, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: var(--font-sans);
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        header {
+            width: 100%;
+            padding: 2rem 0;
+            text-align: center;
+            border-bottom: 1px solid var(--border-color);
+            background: linear-gradient(180deg, rgba(43,59,229,0.1) 0%, rgba(10,10,10,1) 100%);
+        }
+
+        h1 {
+            font-family: var(--font-mono);
+            font-weight: 400;
+            letter-spacing: -1px;
+            margin: 0;
+            color: #FFF;
+        }
+
+        h1 span {
+            color: var(--accent-color);
+        }
+
+        p.subtitle {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            color: #888;
+            margin-top: 0.5rem;
+        }
+
+        main {
+            width: 100%;
+            max-width: 900px;
+            padding: 2rem;
+            box-sizing: border-box;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+        }
+
+        .panel {
+            background-color: #111;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            padding: 1.5rem;
+            position: relative;
+        }
+
+        .panel::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 4px;
+            height: 100%;
+            background-color: var(--accent-color);
+        }
+
+        label {
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #888;
+            display: block;
+            margin-bottom: 0.5rem;
+        }
+
+        textarea {
+            width: 100%;
+            height: 300px;
+            background-color: #050505;
+            color: var(--success-color);
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            resize: vertical;
+            box-sizing: border-box;
+            outline: none;
+        }
+
+        textarea:focus {
+            border-color: var(--accent-color);
+        }
+
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 1rem;
+        }
+
+        .cost {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            color: #AAA;
+        }
+
+        button {
+            background-color: var(--accent-color);
+            color: #FFF;
+            border: none;
+            padding: 0.75rem 2rem;
+            font-family: var(--font-mono);
+            font-size: 1rem;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        button:hover {
+            background-color: #FFF;
+            color: var(--accent-color);
+        }
+
+        button:disabled {
+            background-color: #333;
+            color: #666;
+            cursor: not-allowed;
+        }
+
+        #result-panel {
+            display: none;
+        }
+
+        .result-box {
+            background-color: #050505;
+            border: 1px solid var(--border-color);
+            padding: 1rem;
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+            overflow-x: auto;
+            white-space: pre-wrap;
+        }
+
+        .status-verified {
+            color: var(--success-color);
+        }
+
+        .status-rejected {
+            color: var(--error-color);
+        }
+
+        .cert-hash {
+            color: var(--accent-color);
+            word-break: break-all;
+        }
+
+        footer {
+            margin-top: auto;
+            padding: 2rem;
+            font-family: var(--font-mono);
+            font-size: 0.8rem;
+            color: #555;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>ANVIL<span>+Z3</span></h1>
+    <p class="subtitle">Proof Markets SaaS — Monetizing Mathematical Trust</p>
+</header>
+
+<main>
+    <div class="panel">
+        <label for="code">Anvil Smart Contract Invariants (Source Code)</label>
+        <textarea id="code" spellcheck="false">
+contract AMM {
+    let reserve_x: u64;
+    let reserve_y: u64;
+
+    fn swap(amount_in: u64) -> u64
+        requires amount_in > 0;
+        requires reserve_x > 0;
+        requires reserve_y > 0;
+        ensures reserve_x * reserve_y == (old(reserve_x) + amount_in) * (old(reserve_y) - return_val);
+    {
+        // ... Implementation goes here ...
+        // Anvil will verify if the math holds true universally.
+    }
+}
+        </textarea>
+        
+        <div class="toolbar">
+            <div class="cost">Cost: <strong>0.05 ETH</strong> per formal proof</div>
+            <button id="verify-btn" onclick="submitVerification()">Pay & Verify</button>
+        </div>
+    </div>
+
+    <div class="panel" id="result-panel">
+        <label>Verification Result</label>
+        <div class="result-box" id="result-content"></div>
+    </div>
+</main>
+
+<footer>
+    CORTEX-Persist • Sovereign Agentic Architecture 2026 • Ley Ω₉ Compliant
+</footer>
+
+<script>
+    async function submitVerification() {
+        const btn = document.getElementById('verify-btn');
+        const code = document.getElementById('code').value;
+        const resultPanel = document.getElementById('result-panel');
+        const resultContent = document.getElementById('result-content');
+
+        btn.disabled = true;
+        btn.innerText = 'PROVING...';
+        resultPanel.style.display = 'none';
+
+        try {
+            // Simulated transaction delay (payment processing)
+            await new Promise(r => setTimeout(r, 800));
+
+            const response = await fetch('/v1/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source_code: code })
+            });
+
+            const data = await response.json();
+            
+            resultPanel.style.display = 'block';
+            
+            if (data.status === 'VERIFIED') {
+                resultContent.innerHTML = `
+<span class="status-verified">[✓] ${data.status}</span>
+Message: ${data.message}
+Timestamp: ${data.timestamp}
+
+<span style="color: #888">=== CRYPTOGRAPHIC CERTIFICATE ===</span>
+Hash: <span class="cert-hash">${data.certificate_hash}</span>
+<span style="color: #888">=================================</span>
+
+<span style="color: #AAA">Transaction settled. Yield generated.</span>`;
+            } else {
+                resultContent.innerHTML = `
+<span class="status-rejected">[✗] ${data.status}</span>
+Error: ${data.message}
+Timestamp: ${data.timestamp}
+
+<span style="color: #AAA">Verification failed. Code mathematically unsound.</span>`;
+            }
+
+        } catch (e) {
+            resultPanel.style.display = 'block';
+            resultContent.innerHTML = `<span class="status-rejected">[✗] SYSTEM ERROR</span>\n${e.message}`;
+        } finally {
+            btn.disabled = false;
+            btn.innerText = 'Pay & Verify';
+        }
+    }
+</script>
+
+</body>
+</html>

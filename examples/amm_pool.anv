@@ -10,8 +10,8 @@ struct AMMPool {
     reserve_y: u64
 }
 
-// Función de swap pura, la solvencia garantizada por el Solver Z3
-fn swap(reserve_x: u64, reserve_y: u64, amount_in_x: u64, amount_out_y: u64) -> u64
+// Función de swap vulnerable a Integer Overflow (u64 wrap-around)
+fn swap_with_fee(reserve_x: u64, reserve_y: u64, amount_in_x: u64) -> u64
     where {
         reserve_x > 0,
         reserve_y > 0,
@@ -20,6 +20,13 @@ fn swap(reserve_x: u64, reserve_y: u64, amount_in_x: u64, amount_out_y: u64) -> 
         reserve_x' * reserve_y' >= reserve_x * reserve_y
     }
 {
+    // Vulnerabilidad C5-REAL: reserve_x * 100 desborda si (reserve_x * 100) > MAX_U64
+    let amount_in_with_fee = amount_in_x * 99;
+    let denominator = (reserve_x * 100) + amount_in_with_fee;
+    let numerator = amount_in_with_fee * reserve_y;
+    
+    let amount_out_y = numerator / denominator;
+    
     reserve_x += amount_in_x;
     reserve_y -= amount_out_y;
     

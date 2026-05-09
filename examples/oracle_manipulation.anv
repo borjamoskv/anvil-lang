@@ -1,0 +1,27 @@
+contract LendingPool {
+    // Vector de Ataque 2: Manipulación de Oráculo de Precio (Spot Price Flashloan Attack)
+    // Frecuente en protocolos de préstamos (Cream Finance, Mango Markets, Euler).
+    
+    fn borrow_against_collateral(collateral: u64, reserve_base: u64, reserve_quote: u64, flashloan_manipulation: u64) -> u64
+        where {
+            collateral > 0,
+            reserve_base > 0,
+            reserve_quote > 0,
+            
+            // LEY: El préstamo concedido NUNCA debe exceder el valor real del colateral.
+            // Asumimos un precio "seguro" del mercado externo igual a 10.
+            borrow_amount' <= collateral * 10
+        }
+    {
+        // 1. El atacante manipula las reservas del pool inyectando tokens (Flashloan)
+        let manipulated_quote = reserve_quote + flashloan_manipulation;
+        
+        // 2. El protocolo calcula el spot price manipulado (Mala práctica: depender del spot local)
+        let spot_price = manipulated_quote / reserve_base;
+        
+        // 3. El protocolo concede el préstamo basado en un colateral artificialmente inflado
+        let borrow_amount = collateral * spot_price;
+        
+        return borrow_amount;
+    }
+}

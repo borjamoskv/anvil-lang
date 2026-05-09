@@ -1,0 +1,11 @@
+contract SafeVault { 
+    fn deposit(bal: u64, amt: u64) -> u64 
+        where { 
+            amt > 0, 
+            bal + amt >= bal, 
+            bal' == bal + amt 
+        } 
+    { 
+        return bal + amt; 
+    } 
+}

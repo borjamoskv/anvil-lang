@@ -9,6 +9,7 @@ mod verifier;
 mod codegen;
 mod lsp;
 mod llvm_ir;
+mod saas;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -53,6 +54,12 @@ enum Commands {
     },
     /// Start the Anvil Language Server Protocol (LSP)
     Lsp,
+    /// Start the Anvil Proof Market SaaS Portal
+    Saas {
+        /// Port to bind the server to
+        #[arg(short, long, default_value_t = 3000)]
+        port: u16,
+    },
 }
 
 #[tokio::main]
@@ -66,6 +73,7 @@ async fn main() {
         Commands::Build { file, output, target } => cmd_build(&file, &output, &target),
         Commands::Ast { file } => cmd_ast(&file),
         Commands::Lsp => lsp::run_server().await,
+        Commands::Saas { port } => saas::start_server(port).await,
     }
 }
 

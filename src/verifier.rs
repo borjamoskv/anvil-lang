@@ -272,6 +272,18 @@ fn encode_body_effects<'ctx>(
 
                             // Assert: ssa_var == computed_result
                             solver.assert(&ssa_var._eq(&result));
+                            
+                            // HARDWARE BOUNDS: The silicon is finite.
+                            // We force Z3 to respect the u64 limits for all intermediate states.
+                            // If an overflow occurs mathematically, this assertion makes the path UNSAT,
+                            // or if we use this as a safety check, we can flag it.
+                            // For true overflow catching, we should model it with BitVectors, but 
+                            // bounding the Int is the first step.
+                            let zero = Int::from_i64(ctx, 0);
+                            // 2^64 as a string because it exceeds i64
+                            let u64_max = Int::from_str(ctx, "18446744073709551616").unwrap();
+                            solver.assert(&ssa_var.ge(&zero));
+                            solver.assert(&ssa_var.lt(&u64_max));
 
                             // Update current value to the new SSA variable
                             current_vars.insert(name.clone(), ssa_var);
@@ -285,6 +297,13 @@ fn encode_body_effects<'ctx>(
                 if let Some(z3_val) = expr_to_z3(ctx, value, &current_vars) {
                     let local_var = Int::new_const(ctx, format!("local_{}", name).as_str());
                     solver.assert(&local_var._eq(&z3_val));
+                    
+                    // Enforce Silicon Bounds on intermediate `let` bindings
+                    let zero = Int::from_i64(ctx, 0);
+                    let u64_max = Int::from_str(ctx, "18446744073709551616").unwrap();
+                    solver.assert(&local_var.ge(&zero));
+                    solver.assert(&local_var.lt(&u64_max));
+                    
                     current_vars.insert(name.clone(), local_var);
                 }
             },

@@ -1,0 +1,65 @@
+contract StressTestEngine {
+    pool_balance: u64 = 1000000;
+    total_debt: u64 = 500000;
+    
+    where {
+        // C5-REAL Global Invariant: Solvency is non-negotiable
+        pool_balance >= total_debt
+    }
+
+    // 1. K2 LENDING CLOSE-FACTOR BYPASS (Adversarial simulation)
+    // Z3 must catch that the loop allows liquidating more than close_factor
+    fn k2_liquidate(debt_to_cover: u64, close_factor: u64) -> u64
+        where {
+            close_factor <= 50,
+            debt_to_cover > 0,
+            // The crucial business invariant:
+            debt_to_cover <= (total_debt * close_factor) / 100,
+            
+            total_debt' == total_debt - debt_to_cover,
+            pool_balance' == pool_balance - debt_to_cover
+        }
+    {
+        let mut liquidated = 0;
+        
+        // Malicious loop trying to bypass the global close_factor check
+        // by executing sequential micro-liquidations
+        while liquidated < debt_to_cover
+            where {
+                liquidated <= debt_to_cover,
+                total_debt >= liquidated,
+                pool_balance >= liquidated
+            }
+        {
+            liquidated += 1000; 
+            total_debt -= 1000;
+            pool_balance -= 1000;
+        }
+
+        return liquidated;
+    }
+
+    // 2. MATHEMATICAL CONSERVATION (Hoare Logic Stress)
+    fn flash_loan_arbitrage(reserves: u64, flash_amount: u64, fee: u64) -> u64
+        where {
+            flash_amount > 0,
+            reserves >= flash_amount,
+            fee == (flash_amount * 3) / 1000, // 0.3% fee
+            
+            // The post-state pool must strictly increase by exactly the fee
+            reserves' == reserves + fee
+        }
+    {
+        // 1. Withdraw loan
+        reserves -= flash_amount;
+        
+        // 2. Arbitrage logic (simulated by returning amount + fee)
+        let mut returned = flash_amount;
+        returned += fee;
+        
+        // 3. Repay loan + fee
+        reserves += returned;
+        
+        return reserves;
+    }
+}

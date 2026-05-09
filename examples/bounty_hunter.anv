@@ -1,0 +1,49 @@
+// ============================================================
+// CORTEX VULNERABILITY SCANNER — IMMUNEFI BOUNTY HUNTER
+// Target: Lending Pool Exploit (Logical Drain)
+// Value: $100K+
+// ============================================================
+// Objetivo: Demostrar que Anvil dejó de ser un lenguaje para
+// convertirse en un escáner de vulnerabilidades de grado militar.
+// Escribimos el invariante "Nadie puede drenar el pool", 
+// y Z3 encontrará el exploit en milisegundos.
+// ============================================================
+
+// Función de préstamo sana.
+fn borrow(pool_liquidity: u64, total_borrows: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        pool_liquidity >= total_borrows + amount,
+        
+        pool_liquidity' == pool_liquidity,
+        total_borrows' == total_borrows + amount,
+        
+        pool_liquidity' >= total_borrows'
+    }
+{
+    total_borrows += amount;
+    return total_borrows;
+}
+
+// Función vulnerable de liquidación
+// Un error lógico permite al liquidador retirar colateral sin
+// reducir la deuda total correspondiente, rompiendo la solvencia.
+fn liquidate_vulnerable(pool_liquidity: u64, total_borrows: u64, repay_amount: u64) -> u64
+    where {
+        repay_amount > 0,
+        pool_liquidity >= total_borrows,
+        repay_amount <= pool_liquidity, // Guard para aislar el bug
+        
+        pool_liquidity' == pool_liquidity - repay_amount,
+        total_borrows' == total_borrows, // BUG: La deuda no se reduce!
+        
+        // INVARIANTE A VERIFICAR POR Z3:
+        pool_liquidity' >= total_borrows'
+    }
+{
+    // El atacante retira liquidez del pool
+    pool_liquidity -= repay_amount;
+    // ERROR: Se omite la reducción de la deuda
+    
+    return pool_liquidity;
+}
