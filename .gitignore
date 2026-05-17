@@ -24,3 +24,14 @@ CORTEX_Immunefi_Payload.zip
 tmp/
 audit/
 *.zip
+
+# Runtime database
+anvil.db
+
+# Build artifacts
+cache/
+out/
+
+# Python bytecode
+__pycache__/
+*.pyc

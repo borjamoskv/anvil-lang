@@ -264,6 +264,8 @@ fn gen_bin_op(op: &BinOp) -> &str {
         BinOp::Neq => "!=", BinOp::Lt => "<", BinOp::Gt => ">",
         BinOp::Lte => "<=", BinOp::Gte => ">=",
         BinOp::And => "&&", BinOp::Or => "||",
+        BinOp::BitAnd => "&", BinOp::BitOr => "|", BinOp::BitXor => "^",
+        BinOp::Shl => "<<", BinOp::Shr => ">>",
     }
 }
 
@@ -276,6 +278,9 @@ fn gen_assign_op(op: &AssignOp) -> &str {
         AssignOp::Assign => "=", AssignOp::AddAssign => "+=",
         AssignOp::SubAssign => "-=", AssignOp::MulAssign => "*=",
         AssignOp::DivAssign => "/=",
+        AssignOp::BitAndAssign => "&=", AssignOp::BitOrAssign => "|=",
+        AssignOp::BitXorAssign => "^=", AssignOp::ShlAssign => "<<=",
+        AssignOp::ShrAssign => ">>=",
     }
 }
 
@@ -309,6 +314,8 @@ fn format_inv_term(term: &InvTerm) -> String {
             format!("({} {} {})", format_inv_term(left), match op {
                 ArithOp::Add => "+", ArithOp::Sub => "-", ArithOp::Mul => "×",
                 ArithOp::Div => "÷", ArithOp::Mod => "%",
+                ArithOp::BitAnd => "&", ArithOp::BitOr => "|", ArithOp::BitXor => "^",
+                ArithOp::Shl => "<<", ArithOp::Shr => ">>",
             }, format_inv_term(right))
         },
         InvTerm::FieldAccess { object, field, is_post } => {

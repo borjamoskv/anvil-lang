@@ -1,1 +1,6 @@
+[env]
+Z3_SYS_Z3_HEADER = "/opt/homebrew/Cellar/z3/4.15.4/include/z3.h"
+LIBRARY_PATH = "/opt/homebrew/Cellar/z3/4.15.4/lib"
 
+[build]
+rustflags = ["-L", "/opt/homebrew/Cellar/z3/4.15.4/lib"]

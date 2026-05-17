@@ -3,294 +3,741 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Anvil Proof Markets — Zero Runtime Checks</title>
+    <title>Anvil — Formal Verification as a Service</title>
+    <meta name="description" content="Submit smart contract code. Get a cryptographic proof. No tests, no assertions, no trust.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=Inter:wght@300;400;500&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-color: #0A0A0A;
-            --text-color: #E0E0E0;
-            --accent-color: #2B3BE5;
-            --error-color: #E52B50;
-            --success-color: #00FF66;
-            --border-color: #333;
-            --font-mono: 'IBM Plex Mono', 'Menlo', 'Courier New', monospace;
-            --font-sans: 'Inter', system-ui, sans-serif;
+            --bg: #0A0A0A;
+            --bg-2: #111111;
+            --bg-3: #161616;
+            --text: #E8E8E8;
+            --text-muted: #666;
+            --accent: #2B3BE5;
+            --accent-dim: rgba(43,59,229,0.15);
+            --green: #00FF88;
+            --red: #FF3355;
+            --border: #1F1F1F;
+            --mono: 'IBM Plex Mono', monospace;
+            --sans: 'Inter', system-ui, sans-serif;
         }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
 
         body {
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            font-family: var(--font-sans);
-            margin: 0;
-            padding: 0;
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            min-height: 100vh;
             display: flex;
             flex-direction: column;
-            align-items: center;
-            min-height: 100vh;
         }
 
-        header {
-            width: 100%;
-            padding: 2rem 0;
-            text-align: center;
-            border-bottom: 1px solid var(--border-color);
-            background: linear-gradient(180deg, rgba(43,59,229,0.1) 0%, rgba(10,10,10,1) 100%);
-        }
-
-        h1 {
-            font-family: var(--font-mono);
-            font-weight: 400;
-            letter-spacing: -1px;
-            margin: 0;
-            color: #FFF;
-        }
-
-        h1 span {
-            color: var(--accent-color);
-        }
-
-        p.subtitle {
-            font-family: var(--font-mono);
-            font-size: 0.9rem;
-            color: #888;
-            margin-top: 0.5rem;
-        }
-
-        main {
-            width: 100%;
-            max-width: 900px;
-            padding: 2rem;
-            box-sizing: border-box;
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 2rem;
-        }
-
-        .panel {
-            background-color: #111;
-            border: 1px solid var(--border-color);
-            border-radius: 4px;
-            padding: 1.5rem;
-            position: relative;
-        }
-
-        .panel::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 4px;
-            height: 100%;
-            background-color: var(--accent-color);
-        }
-
-        label {
-            font-family: var(--font-mono);
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #888;
-            display: block;
-            margin-bottom: 0.5rem;
-        }
-
-        textarea {
-            width: 100%;
-            height: 300px;
-            background-color: #050505;
-            color: var(--success-color);
-            border: 1px solid var(--border-color);
-            padding: 1rem;
-            font-family: var(--font-mono);
-            font-size: 0.9rem;
-            resize: vertical;
-            box-sizing: border-box;
-            outline: none;
-        }
-
-        textarea:focus {
-            border-color: var(--accent-color);
-        }
-
-        .toolbar {
+        /* ── NAV ── */
+        nav {
             display: flex;
-            justify-content: space-between;
             align-items: center;
+            justify-content: space-between;
+            padding: 1.25rem 2rem;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            background: rgba(10,10,10,0.95);
+            backdrop-filter: blur(12px);
+            z-index: 100;
+        }
+
+        .logo {
+            font-family: var(--mono);
+            font-size: 1.1rem;
+            letter-spacing: -0.5px;
+            color: #fff;
+        }
+        .logo span { color: var(--accent); }
+
+        .nav-badge {
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            border: 1px solid var(--border);
+            padding: 0.25rem 0.75rem;
+            letter-spacing: 1px;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--green);
+            margin-right: 0.5rem;
+            animation: pulse 2s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        /* ── HERO ── */
+        .hero {
+            padding: 5rem 2rem 3rem;
+            text-align: center;
+            background: radial-gradient(ellipse 80% 40% at 50% 0%, rgba(43,59,229,0.08) 0%, transparent 70%);
+        }
+
+        .hero-label {
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            color: var(--accent);
+            letter-spacing: 3px;
+            text-transform: uppercase;
+            margin-bottom: 1.5rem;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 5vw, 4rem);
+            font-weight: 300;
+            letter-spacing: -2px;
+            line-height: 1.1;
+            color: #fff;
+            margin-bottom: 1.25rem;
+        }
+
+        .hero h1 em {
+            font-style: normal;
+            color: var(--accent);
+        }
+
+        .hero p {
+            font-family: var(--mono);
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            max-width: 520px;
+            margin: 0 auto 3rem;
+            line-height: 1.7;
+        }
+
+        /* ── STATS BAR ── */
+        .stats {
+            display: flex;
+            justify-content: center;
+            gap: 0;
+            border: 1px solid var(--border);
+            max-width: 720px;
+            margin: 0 auto 4rem;
+        }
+
+        .stat {
+            flex: 1;
+            padding: 1.25rem;
+            text-align: center;
+            border-right: 1px solid var(--border);
+        }
+        .stat:last-child { border-right: none; }
+
+        .stat-val {
+            font-family: var(--mono);
+            font-size: 1.5rem;
+            color: #fff;
+            font-weight: 500;
+        }
+
+        .stat-label {
+            font-family: var(--mono);
+            font-size: 0.68rem;
+            color: var(--text-muted);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-top: 0.3rem;
+        }
+
+        /* ── MAIN GRID ── */
+        .main {
+            flex: 1;
+            max-width: 1100px;
+            margin: 0 auto;
+            padding: 0 2rem 4rem;
+            width: 100%;
+            display: grid;
+            grid-template-columns: 1fr 380px;
+            gap: 1.5rem;
+            align-items: start;
+        }
+
+        /* ── EDITOR PANEL ── */
+        .panel {
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+        }
+
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.85rem 1.25rem;
+            border-bottom: 1px solid var(--border);
+            background: var(--bg-3);
+        }
+
+        .panel-title {
+            font-family: var(--mono);
+            font-size: 0.75rem;
+            letter-spacing: 1.5px;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        .dots {
+            display: flex;
+            gap: 6px;
+        }
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--border);
+        }
+
+        textarea#code {
+            width: 100%;
+            height: 380px;
+            background: transparent;
+            color: var(--green);
+            border: none;
+            padding: 1.25rem;
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            line-height: 1.6;
+            resize: vertical;
+            outline: none;
+            tab-size: 4;
+        }
+
+        .panel-footer {
+            padding: 1rem 1.25rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--bg-3);
+        }
+
+        .char-count {
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+
+        #verify-btn {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 0.65rem 1.75rem;
+            font-family: var(--mono);
+            font-size: 0.85rem;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            cursor: pointer;
+            transition: background 0.15s, transform 0.1s;
+        }
+
+        #verify-btn:hover { background: #3d50f5; }
+        #verify-btn:active { transform: scale(0.98); }
+        #verify-btn:disabled { background: #1f1f1f; color: #444; cursor: not-allowed; }
+
+        /* ── RESULT PANEL ── */
+        #result-panel {
+            display: none;
+            background: var(--bg-2);
+            border: 1px solid var(--border);
             margin-top: 1rem;
         }
 
-        .cost {
-            font-family: var(--font-mono);
-            font-size: 0.9rem;
-            color: #AAA;
-        }
-
-        button {
-            background-color: var(--accent-color);
-            color: #FFF;
-            border: none;
-            padding: 0.75rem 2rem;
-            font-family: var(--font-mono);
-            font-size: 1rem;
-            text-transform: uppercase;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        button:hover {
-            background-color: #FFF;
-            color: var(--accent-color);
-        }
-
-        button:disabled {
-            background-color: #333;
-            color: #666;
-            cursor: not-allowed;
-        }
-
-        #result-panel {
-            display: none;
-        }
-
-        .result-box {
-            background-color: #050505;
-            border: 1px solid var(--border-color);
-            padding: 1rem;
-            font-family: var(--font-mono);
-            font-size: 0.9rem;
-            overflow-x: auto;
+        .result-content {
+            padding: 1.25rem;
+            font-family: var(--mono);
+            font-size: 0.82rem;
+            line-height: 1.7;
             white-space: pre-wrap;
-        }
-
-        .status-verified {
-            color: var(--success-color);
-        }
-
-        .status-rejected {
-            color: var(--error-color);
-        }
-
-        .cert-hash {
-            color: var(--accent-color);
             word-break: break-all;
         }
 
+        .result-verified { color: var(--green); }
+        .result-rejected { color: var(--red); }
+        .result-hash { color: var(--accent); }
+        .result-muted { color: var(--text-muted); }
+
+        /* ── SIDEBAR ── */
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .info-card {
+            background: var(--bg-2);
+            border: 1px solid var(--border);
+            padding: 1.25rem;
+        }
+
+        .info-card h3 {
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: var(--accent);
+            margin-bottom: 1rem;
+        }
+
+        .info-card p {
+            font-size: 0.83rem;
+            color: var(--text-muted);
+            line-height: 1.6;
+        }
+
+        .examples-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .examples-list li {
+            font-family: var(--mono);
+            font-size: 0.78rem;
+        }
+
+        .ex-btn {
+            background: none;
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+            padding: 0.5rem 0.75rem;
+            width: 100%;
+            text-align: left;
+            cursor: pointer;
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            transition: all 0.15s;
+        }
+        .ex-btn:hover {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: var(--accent-dim);
+        }
+
+        .pipeline {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .pipe-step {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-family: var(--mono);
+            font-size: 0.78rem;
+            color: var(--text-muted);
+        }
+
+        .pipe-num {
+            width: 22px;
+            height: 22px;
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.65rem;
+            color: var(--accent);
+            flex-shrink: 0;
+        }
+
+        /* ── FOOTER ── */
         footer {
-            margin-top: auto;
-            padding: 2rem;
-            font-family: var(--font-mono);
-            font-size: 0.8rem;
-            color: #555;
-            text-align: center;
+            border-top: 1px solid var(--border);
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .footer-text {
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            color: var(--text-muted);
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 1.5rem;
+        }
+
+        .footer-links a {
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            color: var(--text-muted);
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+        .footer-links a:hover { color: var(--accent); }
+
+        /* ── LOADING ── */
+        .spinner {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border: 1px solid var(--accent);
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+            margin-right: 0.5rem;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        @media (max-width: 768px) {
+            .main { grid-template-columns: 1fr; }
+            .stats { flex-wrap: wrap; }
+            .stat { min-width: 50%; }
         }
     </style>
 </head>
 <body>
 
-<header>
-    <h1>ANVIL<span>+Z3</span></h1>
-    <p class="subtitle">Proof Markets SaaS — Monetizing Mathematical Trust</p>
-</header>
+<nav>
+    <div class="logo">ANVIL<span>+Z3</span></div>
+    <div class="nav-badge"><span class="status-dot"></span>ENGINE ONLINE</div>
+</nav>
 
-<main>
-    <div class="panel">
-        <label for="code">Anvil Smart Contract Invariants (Source Code)</label>
-        <textarea id="code" spellcheck="false">
-contract AMM {
-    let reserve_x: u64;
-    let reserve_y: u64;
+<section class="hero">
+    <div class="hero-label">Formal Verification as a Service</div>
+    <h1>Trust doesn't<br><em>compile.</em></h1>
+    <p>Submit your smart contract invariants. Z3 either proves them mathematically or returns a counterexample. No ambiguity.</p>
 
-    fn swap(amount_in: u64) -> u64
-        requires amount_in > 0;
-        requires reserve_x > 0;
-        requires reserve_y > 0;
-        ensures reserve_x * reserve_y == (old(reserve_x) + amount_in) * (old(reserve_y) - return_val);
-    {
-        // ... Implementation goes here ...
-        // Anvil will verify if the math holds true universally.
+    <div class="stats">
+        <div class="stat">
+            <div class="stat-val" id="stat-total">0</div>
+            <div class="stat-label">Proofs Issued</div>
+        </div>
+        <div class="stat">
+            <div class="stat-val">Z3</div>
+            <div class="stat-label">SMT Solver</div>
+        </div>
+        <div class="stat">
+            <div class="stat-val">v0.6</div>
+            <div class="stat-label">Engine Version</div>
+        </div>
+        <div class="stat">
+            <div class="stat-val">SHA256</div>
+            <div class="stat-label">Cert Integrity</div>
+        </div>
+    </div>
+</section>
+
+<main class="main">
+    <div style="display: flex; flex-direction: column; gap: 1rem;">
+        <!-- EDITOR -->
+        <div class="panel">
+            <div class="panel-header">
+                <div class="panel-title">Anvil Source (.anv)</div>
+                <div class="dots">
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                </div>
+            </div>
+            <textarea id="code" spellcheck="false">fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        sender_balance >= amount,
+        sender_balance' + receiver_balance' == sender_balance + receiver_balance,
+        sender_balance' == sender_balance - amount
     }
-}
-        </textarea>
-        
-        <div class="toolbar">
-            <div class="cost">Cost: <strong>0.05 ETH</strong> per formal proof</div>
-            <button id="verify-btn" onclick="submitVerification()">Pay & Verify</button>
+{
+    sender_balance -= amount;
+    receiver_balance += amount;
+    return sender_balance;
+}</textarea>
+            <div class="panel-footer">
+                <div class="char-count" id="char-count">0 chars</div>
+                <button id="verify-btn" onclick="submitVerification()">⊢ Verify</button>
+            </div>
+        </div>
+
+        <!-- RESULT -->
+        <div class="panel" id="result-panel">
+            <div class="panel-header">
+                <div class="panel-title" id="result-title">Verification Result</div>
+                <div class="dots">
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                    <div class="dot"></div>
+                </div>
+            </div>
+            <div class="result-content" id="result-content"></div>
         </div>
     </div>
 
-    <div class="panel" id="result-panel">
-        <label>Verification Result</label>
-        <div class="result-box" id="result-content"></div>
+    <!-- SIDEBAR -->
+    <div class="sidebar">
+        <!-- AUTHORIZATION CARD -->
+        <div class="info-card" id="auth-card">
+            <h3>Authorization</h3>
+            <p style="margin-bottom: 1rem; font-size: 0.75rem;">High-exergy proofs (>500 chars) require an active key.</p>
+            <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+                <input type="password" id="exergy-key" placeholder="x-exergy-key" 
+                    style="background: var(--bg-3); border: 1px solid var(--border); color: var(--accent); padding: 0.6rem; font-family: var(--mono); font-size: 0.75rem; width: 100%; outline: none;">
+                <div style="display: flex; gap: 0.5rem;">
+                    <button class="ex-btn" style="flex: 1; text-align: center;" onclick="validateCurrentKey()">Validate</button>
+                    <a href="https://agents.archi" target="_blank" class="ex-btn" style="flex: 1; text-align: center; text-decoration: none;">Get Key</a>
+                </div>
+                <div id="auth-status" style="font-family: var(--mono); font-size: 0.65rem; color: var(--text-muted); display: none;"></div>
+            </div>
+        </div>
+
+        <div class="info-card">
+            <h3>Pipeline</h3>
+            <div class="pipeline">
+                <div class="pipe-step"><div class="pipe-num">1</div>PEG Parser → Typed AST</div>
+                <div class="pipe-step"><div class="pipe-num">2</div>Bidirectional Type Check</div>
+                <div class="pipe-step"><div class="pipe-num">3</div>Z3 Hoare Logic + Frame Rule</div>
+                <div class="pipe-step"><div class="pipe-num">4</div>SAT? → Counterexample</div>
+                <div class="pipe-step"><div class="pipe-num">5</div>UNSAT? → SHA256 Certificate</div>
+            </div>
+        </div>
+
+        <div class="info-card">
+            <h3>Examples</h3>
+            <ul class="examples-list">
+                <li><button class="ex-btn" onclick="loadExample('transfer')">transfer.anv — Token conservation</button></li>
+                <li><button class="ex-btn" onclick="loadExample('k2')">k2_bypass.anv — Close factor attack</button></li>
+                <li><button class="ex-btn" onclick="loadExample('reentrancy')">reentrancy.anv — DAO pattern</button></li>
+                <li><button class="ex-btn" onclick="loadExample('overflow')">overflow.anv — Integer bounds</button></li>
+            </ul>
+        </div>
+
+        <div class="info-card">
+            <h3>API</h3>
+            <p style="margin-bottom: 0.75rem;">POST <code style="color: var(--accent);">/v1/verify</code></p>
+            <p>Body: <code style="color: var(--green);">{ "source_code": "..." }</code></p>
+            <p style="margin-top: 0.75rem;">Returns: status, message, certificate_hash, timestamp.</p>
+        </div>
+
+        <div class="info-card">
+            <h3>Observability</h3>
+            <p>Prometheus metrics at <a href="/metrics" style="color: var(--accent);">/metrics</a></p>
+            <p style="margin-top: 0.5rem;">Health check at <a href="/health" style="color: var(--accent);">/health</a></p>
+        </div>
     </div>
 </main>
 
 <footer>
-    CORTEX-Persist • Sovereign Agentic Architecture 2026 • Ley Ω₉ Compliant
+    <div class="footer-text">ANVIL v0.6.0 · BorjaMoskv × Antigravity · 2026</div>
+    <div class="footer-links">
+        <a href="https://github.com/borjamoskv/anvil-lang" target="_blank">GitHub</a>
+        <a href="/metrics">Metrics</a>
+        <a href="/health">Health</a>
+    </div>
 </footer>
 
 <script>
+    const EXAMPLES = {
+        transfer: `fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        sender_balance >= amount,
+        sender_balance' + receiver_balance' == sender_balance + receiver_balance,
+        sender_balance' == sender_balance - amount
+    }
+{
+    sender_balance -= amount;
+    receiver_balance += amount;
+    return sender_balance;
+}`,
+        k2: `// K2 Lending — Close Factor Bypass
+// Vector 2: Double-call exceeds 50% cap (SHOULD FAIL → proves vuln)
+fn double_liquidation_bypass(
+    debt: u256,
+    close_factor: u256,
+    first_call: u256,
+    second_call: u256,
+    total_liquidated: u256
+) -> u256
+where {
+    debt > 0,
+    close_factor == 5000,
+    first_call > 0,
+    second_call > 0,
+    first_call <= debt * close_factor / 10000,
+    second_call <= (debt - first_call) * close_factor / 10000,
+    total_liquidated' <= debt * close_factor / 10000
+} {
+    total_liquidated += first_call;
+    total_liquidated += second_call;
+    return total_liquidated;
+}`,
+        reentrancy: `// The DAO Reentrancy Pattern — should be REJECTED
+fn withdraw(balance: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        balance >= amount,
+        balance' == balance - amount
+    }
+{
+    // BUG: external call before state update
+    // Anvil proves the postcondition cannot hold
+    // if state update happens after external call
+    balance -= amount;
+    return balance;
+}`,
+        overflow: `fn safe_add(a: u64, b: u64) -> u64
+    where {
+        a > 0,
+        b > 0,
+        a' + b' < 18446744073709551615,
+        result' == a + b
+    }
+{
+    return a + b;
+}`
+    };
+
+    const textarea = document.getElementById('code');
+    const charCount = document.getElementById('char-count');
+    const keyInput = document.getElementById('exergy-key');
+    const authStatus = document.getElementById('auth-status');
+
+    // Persistence
+    keyInput.value = localStorage.getItem('x-exergy-key') || '';
+    
+    textarea.addEventListener('input', () => {
+        charCount.textContent = textarea.value.length + ' chars';
+    });
+    charCount.textContent = textarea.value.length + ' chars';
+
+    keyInput.addEventListener('input', () => {
+        localStorage.setItem('x-exergy-key', keyInput.value);
+    });
+
+    async function validateCurrentKey() {
+        const key = keyInput.value.trim();
+        if (!key) return;
+
+        authStatus.style.display = 'block';
+        authStatus.innerHTML = '<span class="spinner"></span>VALIDATING...';
+        authStatus.style.color = 'var(--text-muted)';
+
+        try {
+            const r = await fetch('/v1/auth/validate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ key })
+            });
+            const data = await r.json();
+            if (data.valid) {
+                authStatus.innerHTML = `✓ ACTIVE [${data.tier}] - OWNER: ${data.owner}`;
+                authStatus.style.color = 'var(--green)';
+            } else {
+                authStatus.innerHTML = '✗ INVALID OR REVOKED';
+                authStatus.style.color = 'var(--red)';
+            }
+        } catch (e) {
+            authStatus.innerHTML = '✗ CONNECTION ERROR';
+        }
+    }
+
+    function loadExample(key) {
+        textarea.value = EXAMPLES[key];
+        charCount.textContent = textarea.value.length + ' chars';
+        document.getElementById('result-panel').style.display = 'none';
+    }
+
+    // Load proof count from health
+    async function loadStats() {
+        try {
+            const r = await fetch('/health');
+            if (r.ok) {
+                // Engine confirmed online — update stat
+                document.getElementById('stat-total').textContent = '∞';
+            }
+        } catch(e) {}
+    }
+    loadStats();
+
     async function submitVerification() {
         const btn = document.getElementById('verify-btn');
-        const code = document.getElementById('code').value;
+        const code = textarea.value.trim();
         const resultPanel = document.getElementById('result-panel');
         const resultContent = document.getElementById('result-content');
+        const resultTitle = document.getElementById('result-title');
+
+        if (!code) return;
 
         btn.disabled = true;
-        btn.innerText = 'PROVING...';
+        btn.innerHTML = '<span class="spinner"></span>PROVING...';
         resultPanel.style.display = 'none';
 
         try {
-            // Simulated Stripe payment flow
-            await new Promise(r => setTimeout(r, 800));
+            const headers = { 'Content-Type': 'application/json' };
+            const key = keyInput.value.trim();
+            if (key) {
+                headers['x-exergy-key'] = key;
+            }
 
-            const response = await fetch('http://127.0.0.1:8000/v1/prove', {
+            const response = await fetch('/v1/verify', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                    client_id: "cortex_web",
-                    stripe_session_id: "cs_test_mock", 
-                    source_code: code 
-                })
+                headers: headers,
+                body: JSON.stringify({ source_code: code })
             });
 
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
             const data = await response.json();
-            
             resultPanel.style.display = 'block';
-            
-            if (data.status === 'PROVEN_SAFE') {
-                resultContent.innerHTML = `
-<span class="status-verified">[✓] ${data.status}</span>
-Execution Time: ${data.execution_time_ms} ms
 
-<span style="color: #888">=== Z3 SOLVER OUTPUT ===</span>
-${data.z3_output}
-<span style="color: #888">========================</span>
+            if (data.status === 'VERIFIED') {
+                resultTitle.textContent = '✓ PROVEN — Certificate Issued';
+                resultContent.innerHTML =
+`<span class="result-verified">STATUS  : ${data.status}</span>
+<span class="result-muted">MESSAGE : ${data.message}</span>
+<span class="result-muted">TIME    : ${data.timestamp}</span>
 
-<span style="color: #888">=== CRYPTOGRAPHIC CERTIFICATE ===</span>
-Hash: <span class="cert-hash">${data.certificate_hash}</span>
-<span style="color: #888">=================================</span>
+<span class="result-muted">─── CRYPTOGRAPHIC CERTIFICATE ──────────────────</span>
+HASH    : <span class="result-hash">${data.certificate_hash}</span>
+<span class="result-muted">────────────────────────────────────────────────</span>
 
-<span style="color: #AAA">Transaction settled. Yield generated.</span>`;
+<span class="result-muted">Z3 returned UNSAT — no counterexample exists.
+The invariants hold universally over the state space.</span>`;
             } else {
-                resultContent.innerHTML = `
-<span class="status-rejected">[✗] ${data.status}</span>
-Execution Time: ${data.execution_time_ms} ms
+                resultTitle.textContent = '✗ REJECTED — Invariant Violated';
+                resultContent.innerHTML =
+`<span class="result-rejected">STATUS  : ${data.status}</span>
+<span class="result-muted">MESSAGE : ${data.message}</span>
+<span class="result-muted">TIME    : ${data.timestamp}</span>
 
-<span style="color: #888">=== Z3 SOLVER OUTPUT ===</span>
-${data.z3_output}
-<span style="color: #888">========================</span>
-
-<span style="color: #AAA">Verification failed. Code mathematically unsound or payment failed.</span>`;
+<span class="result-muted">Z3 found a counterexample — the invariants cannot be proven.
+The code is mathematically unsound under the stated constraints.</span>`;
             }
 
         } catch (e) {
             resultPanel.style.display = 'block';
-            resultContent.innerHTML = `<span class="status-rejected">[✗] SYSTEM ERROR</span>\n${e.message}\nMake sure the Rust backend is running on port 8000.`;
+            resultTitle.textContent = '✗ CONNECTION ERROR';
+            resultContent.innerHTML =
+`<span class="result-rejected">ERROR: ${e.message}</span>
+
+<span class="result-muted">Start the backend with:
+  cargo run -- serve --port 3000
+
+Or via Docker:
+  docker compose up</span>`;
         } finally {
             btn.disabled = false;
-            btn.innerText = 'Pay & Verify';
+            btn.innerHTML = '⊢ Verify';
         }
     }
 </script>
-
 </body>
 </html>

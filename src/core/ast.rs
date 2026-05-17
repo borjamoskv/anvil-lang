@@ -132,7 +132,7 @@ pub enum LValue {
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-pub enum BinOp { Add, Sub, Mul, Div, Mod, Eq, Neq, Lt, Gt, Lte, Gte, And, Or }
+pub enum BinOp { Add, Sub, Mul, Div, Mod, Eq, Neq, Lt, Gt, Lte, Gte, And, Or, BitAnd, BitOr, BitXor, Shl, Shr }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub enum UnaryOp { Neg, Not }
@@ -141,7 +141,7 @@ pub enum UnaryOp { Neg, Not }
 pub enum CmpOp { Eq, Neq, Lt, Gt, Lte, Gte }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-pub enum ArithOp { Add, Sub, Mul, Div, Mod }
+pub enum ArithOp { Add, Sub, Mul, Div, Mod, BitAnd, BitOr, BitXor, Shl, Shr }
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
-pub enum AssignOp { Assign, AddAssign, SubAssign, MulAssign, DivAssign }
+pub enum AssignOp { Assign, AddAssign, SubAssign, MulAssign, DivAssign, BitAndAssign, BitOrAssign, BitXorAssign, ShlAssign, ShrAssign }

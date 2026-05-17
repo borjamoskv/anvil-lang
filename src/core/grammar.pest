@@ -123,7 +123,7 @@ emit_stmt  = { "emit" ~ ident ~ "(" ~ arg_list? ~ ")" ~ ";" }
 
 let_stmt    = { "let" ~ "mut"? ~ ident ~ (":" ~ type_expr)? ~ "=" ~ expr ~ ";" }
 assign_stmt = { lvalue ~ assign_op ~ expr ~ ";" }
-assign_op   = { "+=" | "-=" | "*=" | "/=" | "=" }
+assign_op   = { "+=" | "-=" | "*=" | "/=" | "&=" | "|=" | "^=" | "<<=" | ">>=" | "=" }
 lvalue      = { ident ~ ("." ~ ident | "[" ~ expr ~ "]")* }
 
 if_stmt     = { "if" ~ expr ~ block ~ ("else" ~ (if_stmt | block))? }
@@ -161,10 +161,11 @@ fn_call_inv    =  { ident ~ "(" ~ (additive ~ ("," ~ additive)*)? ~ ")" }
 field_access_inv = { ident ~ ("." ~ ident_post)+ }
 
 // --- Binary Operators ---
-binary_op = _{ and_op | or_op | cmp_op | add_expr_op | mul_expr_op }
+binary_op = _{ and_op | or_op | cmp_op | bit_op | add_expr_op | mul_expr_op }
 and_op      = { "&&" }
 or_op       = { "||" }
 cmp_op      = { "==" | "!=" | "<=" | ">=" | "<" | ">" }
+bit_op      = { "<<" | ">>" | "&" | "|" | "^" }
 add_expr_op = { "+" | "-" }
 mul_expr_op = { "*" | "/" | "%" }
 

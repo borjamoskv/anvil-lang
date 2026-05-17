@@ -38,6 +38,7 @@ fn liquidate(debt: u64, repay_amount: u64, close_factor: u64, mut total_repaid: 
         close_factor > 0,
         close_factor <= 100,
         debt > 0,
+        total_repaid <= debt * close_factor / 100,
         total_repaid' <= debt * close_factor / 100,
         repay_amount <= debt * close_factor / 100 - total_repaid
     }

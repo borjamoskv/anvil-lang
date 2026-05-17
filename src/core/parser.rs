@@ -7,7 +7,7 @@ use pest_derive::Parser;
 use crate::ast::*;
 
 #[derive(Parser)]
-#[grammar = "grammar.pest"]
+#[grammar = "src/core/grammar.pest"]
 pub struct AnvilParser;
 
 /// Parse an Anvil source file into an AST Program
@@ -401,7 +401,10 @@ fn parse_assign_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> 
     let op = match inners.remove(0).as_str() {
         "=" => AssignOp::Assign, "+=" => AssignOp::AddAssign,
         "-=" => AssignOp::SubAssign, "*=" => AssignOp::MulAssign,
-        "/=" => AssignOp::DivAssign, _ => AssignOp::Assign,
+        "/=" => AssignOp::DivAssign, "&=" => AssignOp::BitAndAssign,
+        "|=" => AssignOp::BitOrAssign, "^=" => AssignOp::BitXorAssign,
+        "<<=" => AssignOp::ShlAssign, ">>=" => AssignOp::ShrAssign,
+        _ => AssignOp::Assign,
     };
     let value = parse_expr(inners.remove(0))?;
     Ok(Stmt::Assign { target: lv, op, value })
@@ -591,6 +594,8 @@ fn parse_bin_op(pair: pest::iterators::Pair<Rule>) -> Result<BinOp, String> {
         "!=" => BinOp::Neq, "<" => BinOp::Lt, ">" => BinOp::Gt,
         "<=" => BinOp::Lte, ">=" => BinOp::Gte,
         "&&" => BinOp::And, "||" => BinOp::Or,
+        "&" => BinOp::BitAnd, "|" => BinOp::BitOr, "^" => BinOp::BitXor,
+        "<<" => BinOp::Shl, ">>" => BinOp::Shr,
         _ => BinOp::Add,
     })
 }

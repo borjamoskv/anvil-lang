@@ -1,6 +1,7 @@
 use axum::{
     routing::{get, post},
     Router, Json, response::{IntoResponse, Html},
+    http::{HeaderMap, StatusCode},
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Sha256, Digest};
@@ -9,9 +10,10 @@ use tokio::net::TcpListener;
 use tracing::{info, error, info_span, Instrument};
 use metrics::{counter, histogram};
 
-use crate::parser;
-use crate::typechecker;
-use crate::verifier;
+use crate::core::parser;
+use crate::core::typechecker;
+use crate::engine::verifier;
+use sqlx::sqlite::SqlitePool;
 
 #[derive(Deserialize)]
 pub struct VerifyRequest {
@@ -27,6 +29,9 @@ pub struct VerifyResponse {
 }
 
 pub async fn start_server(port: u16) {
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:anvil.db".to_string());
+    let pool = SqlitePool::connect(&db_url).await.expect("Failed to connect to database");
+
     // Initialize Prometheus metrics exporter on the same server
     let builder = metrics_exporter_prometheus::PrometheusBuilder::new();
     let handle = builder
@@ -37,10 +42,12 @@ pub async fn start_server(port: u16) {
         .route("/", get(serve_portal))
         .route("/health", get(health_check))
         .route("/v1/verify", post(verify_contract))
+        .route("/v1/auth/validate", post(validate_key))
         .route("/metrics", get(move || {
             let handle = handle.clone();
             async move { handle.render() }
-        }));
+        }))
+        .with_state(pool);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     info!(port = port, addr = %addr, "Anvil Proof Market SaaS starting");
@@ -60,11 +67,35 @@ async fn health_check() -> impl IntoResponse {
 }
 
 async fn serve_portal() -> Html<&'static str> {
-    Html(include_str!("../frontend/index.html"))
+    Html(include_str!("../../frontend/index.html"))
 }
 
-async fn verify_contract(Json(payload): Json<VerifyRequest>) -> impl IntoResponse {
+async fn verify_contract(
+    axum::extract::State(pool): axum::extract::State<SqlitePool>,
+    headers: HeaderMap,
+    Json(payload): Json<VerifyRequest>
+) -> impl IntoResponse {
     let span = info_span!("verify_contract", source_len = payload.source_code.len());
+
+    // --- SOVEREIGN SHIELD (Ω₉ ENFORCEMENT) ---
+    let auth_key = headers.get("x-exergy-key").and_then(|h| h.to_str().ok());
+    
+    // Validate against DB
+    let is_authorized = if let Some(key) = auth_key {
+        check_key_validity(&pool, key).await
+    } else {
+        false
+    };
+
+    if payload.source_code.len() > 500 && !is_authorized {
+        error!("Authorization required for high-exergy verification ({} chars)", payload.source_code.len());
+        return (StatusCode::PAYMENT_REQUIRED, Json(VerifyResponse {
+            status: "AUTHORIZATION_REQUIRED".to_string(),
+            message: "High-Exergy verification (>500 chars) requires a valid x-exergy-key. Get one at agents.archi".to_string(),
+            certificate_hash: None,
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        })).into_response();
+    }
 
     async move {
         let start = std::time::Instant::now();
@@ -82,7 +113,7 @@ async fn verify_contract(Json(payload): Json<VerifyRequest>) -> impl IntoRespons
                     message: format!("Parse Error: {}", e),
                     certificate_hash: None,
                     timestamp: chrono::Utc::now().to_rfc3339(),
-                });
+                }).into_response();
             }
         };
 
@@ -97,7 +128,7 @@ async fn verify_contract(Json(payload): Json<VerifyRequest>) -> impl IntoRespons
                 message: "Type Check Error: Mismatched types or undefined variables.".to_string(),
                 certificate_hash: None,
                 timestamp: chrono::Utc::now().to_rfc3339(),
-            });
+            }).into_response();
         }
 
         // 3. Verify with Z3
@@ -113,7 +144,7 @@ async fn verify_contract(Json(payload): Json<VerifyRequest>) -> impl IntoRespons
                 message: "Verification Failed: Invariants could not be proven mathematically.".to_string(),
                 certificate_hash: None,
                 timestamp: chrono::Utc::now().to_rfc3339(),
-            });
+            }).into_response();
         }
 
         // 4. Issue Cryptographic Certificate
@@ -137,6 +168,54 @@ async fn verify_contract(Json(payload): Json<VerifyRequest>) -> impl IntoRespons
             message: "Code mathematically proven. Cryptographic certificate issued.".to_string(),
             certificate_hash: Some(format!("0x{}", hex_hash)),
             timestamp: chrono::Utc::now().to_rfc3339(),
-        })
+        }).into_response()
     }.instrument(span).await
+}
+
+#[derive(Deserialize)]
+pub struct AuthRequest {
+    pub key: String,
+}
+
+#[derive(Serialize)]
+pub struct AuthResponse {
+    pub valid: bool,
+    pub owner: Option<String>,
+    pub tier: Option<String>,
+}
+
+async fn validate_key(
+    axum::extract::State(pool): axum::extract::State<SqlitePool>,
+    Json(payload): Json<AuthRequest>,
+) -> impl IntoResponse {
+    let result = sqlx::query!(
+        "SELECT owner_id, tier FROM exergy_keys WHERE key_id = ? AND status = 'ACTIVE'",
+        payload.key
+    )
+    .fetch_optional(&pool)
+    .await;
+
+    match result {
+        Ok(Some(row)) => Json(AuthResponse {
+            valid: true,
+            owner: Some(row.owner_id),
+            tier: Some(row.tier.unwrap_or_else(|| "SOVEREIGN".to_string())),
+        }),
+        _ => Json(AuthResponse {
+            valid: false,
+            owner: None,
+            tier: None,
+        }),
+    }
+}
+
+pub async fn check_key_validity(pool: &SqlitePool, key: &str) -> bool {
+    sqlx::query!(
+        "SELECT status FROM exergy_keys WHERE key_id = ? AND status = 'ACTIVE'",
+        key
+    )
+    .fetch_optional(pool)
+    .await
+    .map(|r| r.is_some())
+    .unwrap_or(false)
 }

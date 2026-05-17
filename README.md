@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/borjamoskv/anvil-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/borjamoskv/anvil-lang/actions/workflows/ci.yml)
 [![Version](https://img.shields.io/badge/version-0.6.0-blue)](https://github.com/borjamoskv/anvil-lang/releases)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![License: Sovereign](https://img.shields.io/badge/License-Sovereign-2B3BE5.svg)](SOVEREIGN_LICENSE.md)
 [![Rust](https://img.shields.io/badge/rust-1.85%2B-orange)](https://www.rust-lang.org/)
 
 **A programming language where trust doesn't compile.**
@@ -20,7 +20,7 @@ Anvil is a formally verified programming language designed for **smart contracts
 Every major DeFi exploit was a violated invariant that nobody checked:
 
 | Exploit | Loss | Root Cause | Anvil Prevention |
-|---|---|---|---|
+| :--- | :--- | :--- | :--- |
 | **The DAO** (2016) | $60M | Reentrancy: state update after external call | Postcondition `balance' == balance - amount` forces correct ordering |
 | **Wormhole** (2022) | $320M | Missing signature validation | Precondition `is_valid_signature == true` enforced at compile time |
 | **K2 Lending** (2026) | Close factor bypass | Sequential liquidation calls exceed 50% limit | `total_repaid' <= debt * close_factor / 100` proven by Z3 |
@@ -65,7 +65,7 @@ anvil ast examples/transfer.anv
 
 ## Architecture
 
-```
+```text
 .anv source → [Pest Parser] → AST → [Type Checker] → [Z3 Verifier] → [Codegen] → .rs / .ll
                                           ↓                  ↓                       ↓
                                   Type constraints     SAT? → ✗ REJECTED     LLVM IR (eBPF/RISC-V/x86)
@@ -124,7 +124,7 @@ fn verify(signer: Wallet, hash: TxHash, sig: Signature, gas: Gas) -> bool
 ## Examples
 
 | File | Description | Expected |
-|---|---|---|
+| :--- | :--- | :--- |
 | `transfer.anv` | Token transfer with conservation law | ✅ PROVEN |
 | `vault.anv` | ERC-4626 deposit/withdraw with `&&`/`\|\|` | ✅/✅/❌ (broken withdraw caught) |
 | `reentrancy.anv` | The DAO hack pattern | ❌ REJECTED (counterexample shown) |
@@ -173,7 +173,11 @@ fn verify(signer: Wallet, hash: TxHash, sig: Signature, gas: Gas) -> bool
 
 ## License
 
-MIT
+Anvil operates under the **[Sovereign License v1.0](SOVEREIGN_LICENSE.md)**.
+- **Anvil Core** (Parser, AST, Type Checker) is Open Source (MIT).
+- **Anvil Sovereign Engine** (Z3 Verification, Direct-Silicon JIT) is proprietary.
+
+For commercial proofs and high-performance execution, access the **Proof Market** at `agents.archi`.
 
 ## Quick Start
 

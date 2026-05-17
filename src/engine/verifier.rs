@@ -11,7 +11,7 @@
 //    UNSAT → PROVEN
 // ============================================================
 
-use z3::ast::{Ast, Int, Bool};
+use z3::ast::{Ast, BV, Bool};
 use z3::{Config, Context, SatResult, Solver, Tactic};
 use crate::ast::*;
 use crate::typechecker::{TypeEnv, ConstraintKind};
@@ -73,18 +73,18 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
     crate::singularity::MempoolAwareZ3::inject_mempool_topology(&solver, &ctx);
 
     // Create pre/post Z3 variables for all params
-    let mut pre_vars: HashMap<String, Int> = HashMap::new();
-    let mut post_vars: HashMap<String, Int> = HashMap::new();
+    let mut pre_vars: HashMap<String, BV> = HashMap::new();
+    let mut post_vars: HashMap<String, BV> = HashMap::new();
 
     for param in &func.params {
-        let pre = Int::new_const(&ctx, param.name.as_str());
-        let post = Int::new_const(&ctx, format!("{}_post", param.name).as_str());
+        let pre = BV::new_const(&ctx, param.name.as_str(), 64);
+        let post = BV::new_const(&ctx, format!("{}_post", param.name).as_str(), 64);
         pre_vars.insert(param.name.clone(), pre);
         post_vars.insert(param.name.clone(), post);
     }
 
     // Inject type constraints from the type checker
-    // This bridges the gap between mathematical Int and silicon-bounded integers
+    // This bridges the gap between mathematical BV and silicon-bounded integers
     inject_type_constraints(&ctx, &solver, &pre_vars, &post_vars, type_env);
 
     // Classify invariants: preconditions vs postconditions
@@ -155,8 +155,8 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
 
         // 1. Share Inflation Defense: if assets decreased, supply MUST have decreased
         solver.push();
-        let assets_decreased = post_assets.lt(pre_assets);
-        let supply_decreased = post_supply.lt(pre_supply);
+        let assets_decreased = post_assets.bvult(pre_assets);
+        let supply_decreased = post_supply.bvult(pre_supply);
         let inflation_defense = assets_decreased.implies(&supply_decreased);
         solver.assert(&inflation_defense.not());
         
@@ -180,8 +180,8 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
 
         // 2. Conservation Ratio: pre_solvent => post_solvent
         solver.push();
-        let pre_solvent = pre_assets.ge(pre_supply);
-        let post_solvent = post_assets.ge(post_supply);
+        let pre_solvent = pre_assets.bvuge(pre_supply);
+        let post_solvent = post_assets.bvuge(post_supply);
         let conservation = pre_solvent.implies(&post_solvent);
         solver.assert(&conservation.not());
 
@@ -353,13 +353,13 @@ fn encode_body_effects<'ctx>(
     ctx: &'ctx Context,
     solver: &Solver<'ctx>,
     body: &Block,
-    pre_vars: &HashMap<String, Int<'ctx>>,
-    post_vars: &HashMap<String, Int<'ctx>>,
+    pre_vars: &HashMap<String, BV<'ctx>>,
+    post_vars: &HashMap<String, BV<'ctx>>,
 ) -> HashSet<String> {
     let mut modified = HashSet::new();
     // Track the "current value" of each variable as we walk through statements
     // Initially, current[x] = pre_vars[x]. After assignment, current[x] = new Z3 var.
-    let mut current_vars: HashMap<String, Int<'ctx>> = pre_vars.clone();
+    let mut current_vars: HashMap<String, BV<'ctx>> = pre_vars.clone();
     // SSA counter per variable
     let mut ssa_counters: HashMap<String, usize> = HashMap::new();
 
@@ -375,13 +375,23 @@ fn encode_body_effects<'ctx>(
                     let encoded = match op {
                         AssignOp::Assign => expr_to_z3(ctx, value, &current_vars),
                         AssignOp::AddAssign => expr_to_z3(ctx, value, &current_vars)
-                            .map(|v| Int::add(ctx, &[&current, &v])),
+                            .map(|v| current.bvadd(&v)),
                         AssignOp::SubAssign => expr_to_z3(ctx, value, &current_vars)
-                            .map(|v| Int::sub(ctx, &[&current, &v])),
+                            .map(|v| current.bvsub(&v)),
                         AssignOp::MulAssign => expr_to_z3(ctx, value, &current_vars)
-                            .map(|v| Int::mul(ctx, &[&current, &v])),
+                            .map(|v| current.bvmul(&v)),
                         AssignOp::DivAssign => expr_to_z3(ctx, value, &current_vars)
-                            .map(|v| current.div(&v)),
+                            .map(|v| current.bvudiv(&v)),
+                        AssignOp::BitAndAssign => expr_to_z3(ctx, value, &current_vars)
+                            .map(|v| current.bvand(&v)),
+                        AssignOp::BitOrAssign => expr_to_z3(ctx, value, &current_vars)
+                            .map(|v| current.bvor(&v)),
+                        AssignOp::BitXorAssign => expr_to_z3(ctx, value, &current_vars)
+                            .map(|v| current.bvxor(&v)),
+                        AssignOp::ShlAssign => expr_to_z3(ctx, value, &current_vars)
+                            .map(|v| current.bvshl(&v)),
+                        AssignOp::ShrAssign => expr_to_z3(ctx, value, &current_vars)
+                            .map(|v| current.bvlshr(&v)),
                     };
 
                     if let Some(result) = encoded {
@@ -390,16 +400,10 @@ fn encode_body_effects<'ctx>(
                         *counter += 1;
 
                         let ssa_name = format!("{}_ssa_{}", name, counter);
-                        let ssa_var = Int::new_const(ctx, ssa_name.as_str());
+                        let ssa_var = BV::new_const(ctx, ssa_name.as_str(), 64);
 
                         // Assert: ssa_var == computed_result
                         solver.assert(&ssa_var._eq(&result));
-                        
-                        // HARDWARE BOUNDS: The silicon is finite.
-                        let zero = Int::from_i64(ctx, 0);
-                        let u64_max = Int::from_str(ctx, "18446744073709551616").unwrap();
-                        solver.assert(&ssa_var.ge(&zero));
-                        solver.assert(&ssa_var.lt(&u64_max));
 
                         // Update current value to the new SSA variable
                         current_vars.insert(name.clone(), ssa_var);
@@ -410,14 +414,8 @@ fn encode_body_effects<'ctx>(
             Stmt::Let { name, value, .. } => {
                 // Local variable: create a Z3 variable and bind it
                 if let Some(z3_val) = expr_to_z3(ctx, value, &current_vars) {
-                    let local_var = Int::new_const(ctx, format!("local_{}", name).as_str());
+                    let local_var = BV::new_const(ctx, format!("local_{}", name).as_str(), 64);
                     solver.assert(&local_var._eq(&z3_val));
-                    
-                    // Enforce Silicon Bounds on intermediate `let` bindings
-                    let zero = Int::from_i64(ctx, 0);
-                    let u64_max = Int::from_str(ctx, "18446744073709551616").unwrap();
-                    solver.assert(&local_var.ge(&zero));
-                    solver.assert(&local_var.lt(&u64_max));
                     
                     current_vars.insert(name.clone(), local_var);
                 }
@@ -436,7 +434,7 @@ fn encode_body_effects<'ctx>(
                 // Havoc: create fresh Z3 vars for all loop-modified variables
                 for var_name in &loop_modified {
                     let havoc_name = format!("{}_loop_exit", var_name);
-                    let havoc_var = Int::new_const(ctx, havoc_name.as_str());
+                    let havoc_var = BV::new_const(ctx, havoc_name.as_str(), 64);
                     current_vars.insert(var_name.clone(), havoc_var);
                     modified.insert(var_name.clone());
                 }
@@ -454,23 +452,49 @@ fn encode_body_effects<'ctx>(
                     solver.assert(&exit_cond.not());
                 }
             },
-            Stmt::If { then_block, else_block, .. } => {
-                // Overapproximate: encode effects from both branches
-                // Variables modified in either branch become havoc'd
-                let then_modified = collect_modified_vars(then_block);
-                if let Some(else_b) = else_block {
-                    let else_modified = collect_modified_vars(else_b);
-                    for var_name in then_modified.union(&else_modified) {
-                        let havoc_name = format!("{}_if_merge", var_name);
-                        let havoc_var = Int::new_const(ctx, havoc_name.as_str());
-                        current_vars.insert(var_name.clone(), havoc_var);
+            Stmt::If { condition, then_block, else_block } => {
+                if let Some(cond_z3) = condition_to_z3(ctx, condition, &current_vars) {
+                    let saved_current = current_vars.clone();
+                    
+                    // 1. Encode 'then' branch
+                    let then_modified = encode_body_effects(ctx, solver, then_block, pre_vars, post_vars);
+                    let then_current = current_vars.clone();
+                    
+                    // 2. Encode 'else' branch
+                    current_vars = saved_current.clone();
+                    let else_modified = if let Some(eb) = else_block {
+                        encode_body_effects(ctx, solver, eb, pre_vars, post_vars)
+                    } else {
+                        HashSet::new()
+                    };
+                    let else_current = current_vars.clone();
+                    
+                    // 3. Merge branches using ITE
+                    let all_modified: HashSet<_> = then_modified.union(&else_modified).cloned().collect();
+                    current_vars = saved_current.clone(); // Start merge from baseline
+                    
+                    for var_name in all_modified {
+                        let val_then = then_current.get(&var_name).cloned().unwrap_or_else(|| saved_current.get(&var_name).cloned().unwrap());
+                        let val_else = else_current.get(&var_name).cloned().unwrap_or_else(|| saved_current.get(&var_name).cloned().unwrap());
+                        
+                        let ssa_counter = ssa_counters.entry(var_name.clone()).or_insert(0);
+                        *ssa_counter += 1;
+                        let merge_name = format!("{}_ssa_if_{}", var_name, ssa_counter);
+                        let merge_var = BV::new_const(ctx, merge_name.as_str(), 64);
+                        
+                        // merge_var = cond ? val_then : val_else
+                        solver.assert(&merge_var._eq(&cond_z3.ite(&val_then, &val_else)));
+                        
+                        current_vars.insert(var_name.clone(), merge_var);
                         modified.insert(var_name.clone());
                     }
                 } else {
-                    // If without else: modified vars become indeterminate
-                    for var_name in &then_modified {
-                        let havoc_name = format!("{}_if_merge", var_name);
-                        let havoc_var = Int::new_const(ctx, havoc_name.as_str());
+                    // Fallback to havoc if condition can't be encoded
+                    let then_modified = collect_modified_vars(then_block);
+                    let else_modified = else_block.as_ref().map(collect_modified_vars).unwrap_or_default();
+                    for var_name in then_modified.union(&else_modified) {
+                        let havoc_name = format!("{}_if_havoc", var_name);
+                        let havoc_var = BV::new_const(ctx, havoc_name.as_str(), 64);
                         current_vars.insert(var_name.clone(), havoc_var);
                         modified.insert(var_name.clone());
                     }
@@ -481,7 +505,7 @@ fn encode_body_effects<'ctx>(
                 // Create a Z3 variable and bind it to the expression value.
                 // These are NOT compiled to silicon — they exist for Z3 reasoning only.
                 if let Some(z3_val) = expr_to_z3(ctx, value, &current_vars) {
-                    let ghost_var = Int::new_const(ctx, format!("ghost_{}", name).as_str());
+                    let ghost_var = BV::new_const(ctx, format!("ghost_{}", name).as_str(), 64);
                     solver.assert(&ghost_var._eq(&z3_val));
                     current_vars.insert(name.clone(), ghost_var);
                 }
@@ -532,7 +556,7 @@ fn collect_modified_vars(block: &Block) -> HashSet<String> {
 // Evaluate invariant expression using a single set of "current" variables
 // Used for loop invariants where we don't have a pre/post split
 fn invariant_to_z3_with_current<'ctx>(
-    ctx: &'ctx Context, inv: &InvariantExpr, vars: &HashMap<String, Int<'ctx>>,
+    ctx: &'ctx Context, inv: &InvariantExpr, vars: &HashMap<String, BV<'ctx>>,
 ) -> Option<Bool<'ctx>> {
     // Reuse the standard invariant_to_z3 by passing current vars as both pre and post
     invariant_to_z3(ctx, inv, vars, vars)
@@ -541,7 +565,7 @@ fn invariant_to_z3_with_current<'ctx>(
 // Convert an Anvil Expr (used as a condition) to a Z3 Bool
 // Handles comparisons like `counter > 0`, `i <= n`, and identifier-based conditions
 fn condition_to_z3<'ctx>(
-    ctx: &'ctx Context, expr: &Expr, vars: &HashMap<String, Int<'ctx>>,
+    ctx: &'ctx Context, expr: &Expr, vars: &HashMap<String, BV<'ctx>>,
 ) -> Option<Bool<'ctx>> {
     match expr {
         Expr::BinOp { left, op, right } => {
@@ -550,10 +574,10 @@ fn condition_to_z3<'ctx>(
                     let l = expr_to_z3(ctx, left, vars)?;
                     let r = expr_to_z3(ctx, right, vars)?;
                     Some(match op {
-                        BinOp::Gt => l.gt(&r),
-                        BinOp::Lt => l.lt(&r),
-                        BinOp::Gte => l.ge(&r),
-                        BinOp::Lte => l.le(&r),
+                        BinOp::Gt => l.bvugt(&r),
+                        BinOp::Lt => l.bvult(&r),
+                        BinOp::Gte => l.bvuge(&r),
+                        BinOp::Lte => l.bvule(&r),
                         BinOp::Eq => l._eq(&r).into(),
                         BinOp::Neq => l._eq(&r).not(),
                         _ => unreachable!(),
@@ -576,7 +600,7 @@ fn condition_to_z3<'ctx>(
         Expr::Ident(name) => {
             // Boolean identifier: treat as `name != 0`
             if let Some(var) = vars.get(name.as_str()) {
-                let zero = Int::from_i64(ctx, 0);
+                let zero = BV::from_i64(ctx, 0, 64);
                 Some(var._eq(&zero).not())
             } else {
                 // Unknown boolean — create as fresh Bool constant
@@ -598,45 +622,32 @@ fn condition_to_z3<'ctx>(
 fn inject_type_constraints<'ctx>(
     ctx: &'ctx Context,
     solver: &Solver<'ctx>,
-    pre_vars: &HashMap<String, Int<'ctx>>,
-    post_vars: &HashMap<String, Int<'ctx>>,
+    pre_vars: &HashMap<String, BV<'ctx>>,
+    post_vars: &HashMap<String, BV<'ctx>>,
     type_env: &TypeEnv,
 ) {
-    let zero = Int::from_i64(ctx, 0);
-
-    // Precompute big-integer upper bound strings for types > 63 bits
-    fn upper_bound_str(bits: u32) -> Option<String> {
-        match bits {
-            8 => Some("256".to_string()),
-            16 => Some("65536".to_string()),
-            32 => Some("4294967296".to_string()),
-            64 => Some("18446744073709551616".to_string()),
-            128 => Some("340282366920938463463374607431768211456".to_string()),
-            256 => Some("115792089237316195423570985008687907853269984665640564039457584007913129639936".to_string()),
-            _ => None,
-        }
-    }
+    let zero = BV::from_i64(ctx, 0, 64);
 
     for constraint in &type_env.constraints {
         // Apply to pre-state variable
         if let Some(pre_var) = pre_vars.get(&constraint.var_name) {
             match &constraint.kind {
                 ConstraintKind::NonNegative => {
-                    solver.assert(&pre_var.ge(&zero));
+                    solver.assert(&pre_var.bvuge(&zero));
                 }
                 ConstraintKind::UpperBound { bits } => {
-                    if let Some(bound_str) = upper_bound_str(*bits) {
-                        let upper = Int::from_str(ctx, &bound_str).unwrap();
-                        solver.assert(&pre_var.lt(&upper));
+                    if *bits < 64 {
+                        let upper = BV::from_u64(ctx, 1u64 << bits, 64);
+                        solver.assert(&pre_var.bvult(&upper));
                     }
                 }
                 ConstraintKind::SignedBound { bits } => {
-                    if *bits <= 64 {
+                    if *bits < 64 {
                         let half = 1i64 << (bits - 1);
-                        let lower = Int::from_i64(ctx, -half);
-                        let upper = Int::from_i64(ctx, half);
-                        solver.assert(&pre_var.ge(&lower));
-                        solver.assert(&pre_var.lt(&upper));
+                        let lower = BV::from_i64(ctx, -half, 64);
+                        let upper = BV::from_i64(ctx, half, 64);
+                        solver.assert(&pre_var.bvsge(&lower));
+                        solver.assert(&pre_var.bvslt(&upper));
                     }
                 }
             }
@@ -646,21 +657,21 @@ fn inject_type_constraints<'ctx>(
         if let Some(post_var) = post_vars.get(&constraint.var_name) {
             match &constraint.kind {
                 ConstraintKind::NonNegative => {
-                    solver.assert(&post_var.ge(&zero));
+                    solver.assert(&post_var.bvuge(&zero));
                 }
                 ConstraintKind::UpperBound { bits } => {
-                    if let Some(bound_str) = upper_bound_str(*bits) {
-                        let upper = Int::from_str(ctx, &bound_str).unwrap();
-                        solver.assert(&post_var.lt(&upper));
+                    if *bits < 64 {
+                        let upper = BV::from_u64(ctx, 1u64 << bits, 64);
+                        solver.assert(&post_var.bvult(&upper));
                     }
                 }
                 ConstraintKind::SignedBound { bits } => {
-                    if *bits <= 64 {
+                    if *bits < 64 {
                         let half = 1i64 << (bits - 1);
-                        let lower = Int::from_i64(ctx, -half);
-                        let upper = Int::from_i64(ctx, half);
-                        solver.assert(&post_var.ge(&lower));
-                        solver.assert(&post_var.lt(&upper));
+                        let lower = BV::from_i64(ctx, -half, 64);
+                        let upper = BV::from_i64(ctx, half, 64);
+                        solver.assert(&post_var.bvsge(&lower));
+                        solver.assert(&post_var.bvslt(&upper));
                     }
                 }
             }
@@ -671,34 +682,36 @@ fn inject_type_constraints<'ctx>(
 // --- Z3 translation ---
 
 fn expr_to_z3<'ctx>(
-    ctx: &'ctx Context, expr: &Expr, vars: &HashMap<String, Int<'ctx>>,
-) -> Option<Int<'ctx>> {
+    ctx: &'ctx Context, expr: &Expr, vars: &HashMap<String, BV<'ctx>>,
+) -> Option<BV<'ctx>> {
     match expr {
         Expr::IntLit(n) => {
-            // Handle large literals via string representation
+            // Handle large literals: fall back to 0 if out of 64-bit bounds
             if *n >= i64::MIN as i128 && *n <= i64::MAX as i128 {
-                Some(Int::from_i64(ctx, *n as i64))
+                Some(BV::from_i64(ctx, *n as i64, 64))
+            } else if *n >= u64::MIN as i128 && *n <= u64::MAX as i128 {
+                Some(BV::from_u64(ctx, *n as u64, 64))
             } else {
-                Some(Int::from_str(ctx, &n.to_string()).unwrap_or_else(|| Int::from_i64(ctx, 0)))
+                Some(BV::from_i64(ctx, 0, 64))
             }
         },
         Expr::BoolLit(b) => {
             // Encode booleans as integers: true=1, false=0
-            Some(Int::from_i64(ctx, if *b { 1 } else { 0 }))
+            Some(BV::from_i64(ctx, if *b { 1 } else { 0 }, 64))
         },
         Expr::Ident(name) => vars.get(name.trim()).cloned(),
         Expr::BinOp { left, op, right } => {
             match op {
                 // Arithmetic operations
-                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
                     let l = expr_to_z3(ctx, left, vars)?;
                     let r = expr_to_z3(ctx, right, vars)?;
                     Some(match op {
-                        BinOp::Add => Int::add(ctx, &[&l, &r]),
-                        BinOp::Sub => Int::sub(ctx, &[&l, &r]),
-                        BinOp::Mul => Int::mul(ctx, &[&l, &r]),
-                        BinOp::Div => l.div(&r),
-                        BinOp::Mod => l.rem(&r),
+                        BinOp::Add => l.bvadd(&r),
+                        BinOp::Sub => l.bvsub(&r),
+                        BinOp::Mul => l.bvmul(&r),
+                        BinOp::Div => l.bvudiv(&r),
+                        BinOp::Mod => l.bvurem(&r),
                         _ => unreachable!(),
                     })
                 },
@@ -706,8 +719,8 @@ fn expr_to_z3<'ctx>(
                 BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt
                 | BinOp::Lte | BinOp::Gte | BinOp::And | BinOp::Or => {
                     // These produce boolean results; encode as if-then-else: cond ? 1 : 0
-                    let one = Int::from_i64(ctx, 1);
-                    let z = Int::from_i64(ctx, 0);
+                    let one = BV::from_i64(ctx, 1, 64);
+                    let z = BV::from_i64(ctx, 0, 64);
                     match op {
                         BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt
                         | BinOp::Lte | BinOp::Gte => {
@@ -716,10 +729,10 @@ fn expr_to_z3<'ctx>(
                             let cond = match op {
                                 BinOp::Eq => l._eq(&r),
                                 BinOp::Neq => l._eq(&r).not(),
-                                BinOp::Lt => l.lt(&r),
-                                BinOp::Gt => l.gt(&r),
-                                BinOp::Lte => l.le(&r),
-                                BinOp::Gte => l.ge(&r),
+                                BinOp::Lt => l.bvult(&r),
+                                BinOp::Gt => l.bvugt(&r),
+                                BinOp::Lte => l.bvule(&r),
+                                BinOp::Gte => l.bvuge(&r),
                                 _ => unreachable!(),
                             };
                             Some(cond.ite(&one, &z))
@@ -748,10 +761,10 @@ fn expr_to_z3<'ctx>(
         Expr::UnaryOp { op, operand } => {
             let val = expr_to_z3(ctx, operand, vars)?;
             match op {
-                UnaryOp::Neg => Some(Int::sub(ctx, &[&Int::from_i64(ctx, 0), &val])),
+                UnaryOp::Neg => Some(BV::from_i64(ctx, 0, 64).bvsub(&val)),
                 UnaryOp::Not => {
-                    let z = Int::from_i64(ctx, 0);
-                    let one = Int::from_i64(ctx, 1);
+                    let z = BV::from_i64(ctx, 0, 64);
+                    let one = BV::from_i64(ctx, 1, 64);
                     let is_zero = val._eq(&z);
                     Some(is_zero.ite(&one, &z))
                 },
@@ -761,7 +774,7 @@ fn expr_to_z3<'ctx>(
             // Uninterpreted function: create a fresh Z3 constant
             // This is sound (conservative) — the function could return any value
             let fresh_name = format!("__fn_{}_{}", name, args.len());
-            Some(Int::new_const(ctx, fresh_name.as_str()))
+            Some(BV::new_const(ctx, fresh_name.as_str(), 64))
         },
         Expr::FieldAccess { object, field } => {
             // Field access: encode as {object}_{field} variable lookup
@@ -771,7 +784,7 @@ fn expr_to_z3<'ctx>(
             };
             let composite = format!("{}_{}", obj_name, field);
             vars.get(&composite).cloned()
-                .or_else(|| Some(Int::new_const(ctx, composite.as_str())))
+                .or_else(|| Some(BV::new_const(ctx, composite.as_str(), 64)))
         },
         _ => None,
     }
@@ -779,7 +792,7 @@ fn expr_to_z3<'ctx>(
 
 fn invariant_to_z3<'ctx>(
     ctx: &'ctx Context, inv: &InvariantExpr,
-    pre_vars: &HashMap<String, Int<'ctx>>, post_vars: &HashMap<String, Int<'ctx>>,
+    pre_vars: &HashMap<String, BV<'ctx>>, post_vars: &HashMap<String, BV<'ctx>>,
 ) -> Option<Bool<'ctx>> {
     match inv {
         InvariantExpr::Comparison { left, op, right } => {
@@ -787,8 +800,8 @@ fn invariant_to_z3<'ctx>(
             let r = inv_term_to_z3(ctx, right, pre_vars, post_vars)?;
             Some(match op {
                 CmpOp::Eq => l._eq(&r), CmpOp::Neq => l._eq(&r).not(),
-                CmpOp::Lt => l.lt(&r), CmpOp::Gt => l.gt(&r),
-                CmpOp::Lte => l.le(&r), CmpOp::Gte => l.ge(&r),
+                CmpOp::Lt => l.bvult(&r), CmpOp::Gt => l.bvugt(&r),
+                CmpOp::Lte => l.bvule(&r), CmpOp::Gte => l.bvuge(&r),
             })
         },
         InvariantExpr::And(a, b) => {
@@ -806,8 +819,8 @@ fn invariant_to_z3<'ctx>(
         InvariantExpr::Forall { var, domain, body } => {
             // Quantified assertion: ∀ var ∈ [0, domain) : body
             // Create a bounded integer variable for the quantifier
-            let bound_var = Int::new_const(ctx, var.as_str());
-            let zero = Int::from_i64(ctx, 0);
+            let bound_var = BV::new_const(ctx, var.as_str(), 64);
+            let zero = BV::from_i64(ctx, 0, 64);
             let domain_z3 = inv_term_to_z3(ctx, domain, pre_vars, post_vars)?;
 
             // Construct: ∀ bound_var: (0 <= bound_var < domain) => body
@@ -819,7 +832,7 @@ fn invariant_to_z3<'ctx>(
             augmented_post.insert(var.clone(), bound_var.clone());
 
             let body_z3 = invariant_to_z3(ctx, body, &augmented_pre, &augmented_post)?;
-            let range = Bool::and(ctx, &[&bound_var.ge(&zero), &bound_var.lt(&domain_z3)]);
+            let range = Bool::and(ctx, &[&bound_var.bvuge(&zero), &bound_var.bvult(&domain_z3)]);
             let implication = range.implies(&body_z3);
 
             // Use Z3's native forall
@@ -834,8 +847,8 @@ fn invariant_to_z3<'ctx>(
         },
         InvariantExpr::Exists { var, domain, body } => {
             // Existential: ∃ var ∈ [0, domain) : body
-            let bound_var = Int::new_const(ctx, var.as_str());
-            let zero = Int::from_i64(ctx, 0);
+            let bound_var = BV::new_const(ctx, var.as_str(), 64);
+            let zero = BV::from_i64(ctx, 0, 64);
             let domain_z3 = inv_term_to_z3(ctx, domain, pre_vars, post_vars)?;
 
             let mut augmented_pre = pre_vars.clone();
@@ -844,7 +857,7 @@ fn invariant_to_z3<'ctx>(
             augmented_post.insert(var.clone(), bound_var.clone());
 
             let body_z3 = invariant_to_z3(ctx, body, &augmented_pre, &augmented_post)?;
-            let range = Bool::and(ctx, &[&bound_var.ge(&zero), &bound_var.lt(&domain_z3)]);
+            let range = Bool::and(ctx, &[&bound_var.bvuge(&zero), &bound_var.bvult(&domain_z3)]);
             let conjunction = Bool::and(ctx, &[&range, &body_z3]);
 
             let pattern = z3::Pattern::new(ctx, &[&bound_var as &dyn Ast]);
@@ -861,38 +874,43 @@ fn invariant_to_z3<'ctx>(
 
 fn inv_term_to_z3<'ctx>(
     ctx: &'ctx Context, term: &InvTerm,
-    pre_vars: &HashMap<String, Int<'ctx>>, post_vars: &HashMap<String, Int<'ctx>>,
-) -> Option<Int<'ctx>> {
+    pre_vars: &HashMap<String, BV<'ctx>>, post_vars: &HashMap<String, BV<'ctx>>,
+) -> Option<BV<'ctx>> {
     match term {
-        InvTerm::Literal(n) => Some(Int::from_i64(ctx, *n as i64)),
+        InvTerm::Literal(n) => Some(BV::from_i64(ctx, *n as i64, 64)),
         InvTerm::Var { name, is_post } => {
             if *is_post {
                 post_vars.get(name).cloned()
-                    .or_else(|| Some(Int::new_const(ctx, format!("{}_post", name).as_str())))
+                    .or_else(|| Some(BV::new_const(ctx, format!("{}_post", name).as_str(), 64)))
             } else {
                 pre_vars.get(name).cloned()
-                    .or_else(|| Some(Int::new_const(ctx, name.as_str())))
+                    .or_else(|| Some(BV::new_const(ctx, name.as_str(), 64)))
             }
         },
         InvTerm::BinOp { left, op, right } => {
             let l = inv_term_to_z3(ctx, left, pre_vars, post_vars)?;
             let r = inv_term_to_z3(ctx, right, pre_vars, post_vars)?;
             Some(match op {
-                ArithOp::Add => Int::add(ctx, &[&l, &r]),
-                ArithOp::Sub => Int::sub(ctx, &[&l, &r]),
-                ArithOp::Mul => Int::mul(ctx, &[&l, &r]),
-                ArithOp::Div => l.div(&r),
-                ArithOp::Mod => l.rem(&r),
+                ArithOp::Add => l.bvadd(&r),
+                ArithOp::Sub => l.bvsub(&r),
+                ArithOp::Mul => l.bvmul(&r),
+                ArithOp::Div => l.bvudiv(&r),
+                ArithOp::Mod => l.bvurem(&r),
+                ArithOp::BitAnd => l.bvand(&r),
+                ArithOp::BitOr => l.bvor(&r),
+                ArithOp::BitXor => l.bvxor(&r),
+                ArithOp::Shl => l.bvshl(&r),
+                ArithOp::Shr => l.bvlshr(&r),
             })
         },
         InvTerm::FieldAccess { object, field, is_post } => {
             let n = format!("{}_{}", object, field);
             if *is_post {
                 post_vars.get(&n).cloned()
-                    .or_else(|| Some(Int::new_const(ctx, format!("{}_post", n).as_str())))
+                    .or_else(|| Some(BV::new_const(ctx, format!("{}_post", n).as_str(), 64)))
             } else {
                 pre_vars.get(&n).cloned()
-                    .or_else(|| Some(Int::new_const(ctx, n.as_str())))
+                    .or_else(|| Some(BV::new_const(ctx, n.as_str(), 64)))
             }
         },
         InvTerm::FnCall { name, args } => {
@@ -905,7 +923,7 @@ fn inv_term_to_z3<'ctx>(
                     .unwrap_or_else(|| format!("arg{}", i))
             }).collect();
             let key = format!("__inv_fn_{}_{}", name, arg_strs.join("_"));
-            Some(Int::new_const(ctx, key.as_str()))
+            Some(BV::new_const(ctx, key.as_str(), 64))
         },
     }
 }

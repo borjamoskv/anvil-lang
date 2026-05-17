@@ -2,15 +2,13 @@
 // ANVIL CLI — "Where trust doesn't compile."
 // ============================================================
 
-mod ast;
-mod parser;
-mod typechecker;
-mod verifier;
-mod codegen;
+pub mod core;
+pub mod engine;
 mod lsp;
-mod llvm_ir;
-mod saas;
 mod singularity;
+
+use crate::core::{ast, parser, typechecker};
+use crate::engine::{verifier, codegen, llvm_ir, saas};
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -21,10 +19,10 @@ use tracing::{info, error, info_span};
 #[command(
     name = "anvil",
     version = env!("CARGO_PKG_VERSION"),
-    about = "Anvil — A programming language where trust doesn't compile.",
-    long_about = "Anvil is a formally verified programming language for smart contracts \
+    about = "Anvil — Sovereign Formal Verification Engine.",
+    long_about = "Anvil is a proprietary, formally verified engine for smart contracts \
                   and autonomous agents. Every function carries its proof as a first-class \
-                  citizen. If the compiler can't prove your invariants, your code doesn't exist."
+                  citizen. Access to high-exergy verification is gated by Sovereign Exergy Keys."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -72,6 +70,34 @@ enum Commands {
         #[arg(short, long, default_value_t = 3000)]
         port: u16,
     },
+    /// Manage Exergy Keys for the SaaS portal
+    Keys {
+        #[command(subcommand)]
+        action: KeyAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum KeyAction {
+    /// Add a new exergy key
+    Add {
+        /// Key ID (if not provided, one will be generated)
+        #[arg(short, long)]
+        key: Option<String>,
+        /// Owner identifier (e.g. username)
+        #[arg(short, long)]
+        owner: String,
+        /// Tier (SOVEREIGN, COMMERCIAL, DEVELOPER)
+        #[arg(short, long, default_value = "SOVEREIGN")]
+        tier: String,
+    },
+    /// List all exergy keys
+    List,
+    /// Revoke an exergy key
+    Revoke {
+        /// Key ID to revoke
+        key: String,
+    },
 }
 
 #[tokio::main]
@@ -97,16 +123,18 @@ async fn main() {
         Commands::Ast { file } => cmd_ast(&file),
         Commands::Lsp => lsp::run_server().await,
         Commands::Saas { port } => saas::start_server(port).await,
+        Commands::Keys { action } => cmd_keys(action).await,
     }
 }
 
 fn print_banner() {
     eprintln!();
     eprintln!("{}", "  ╔═══════════════════════════════════════════╗".bright_blue());
-    eprintln!("{}", "  ║   ▄▀█ ███▄ █ █ █ █ █   █                 ║".bright_blue());
-    eprintln!("{}", "  ║   █▀█ █  ▀██ ▀▄▀ █ █▄▄ █▄▄    v0.6      ║".bright_blue());
+    eprintln!("{}", "  ║   ANVIL — SOVEREIGN VERIFICATION ENGINE   ║".bright_blue());
+    eprintln!("{}", "  ║   v0.6.0  [PROPRIETARY // C5-DYNAMIC]     ║".bright_blue());
     eprintln!("{}", "  ║   Where trust doesn't compile.            ║".bright_blue());
     eprintln!("{}", "  ╚═══════════════════════════════════════════╝".bright_blue());
+    eprintln!("  {} System status: {}", "●".bright_green(), "SOVEREIGN SHIELD ACTIVE".bold());
     eprintln!();
 }
 
@@ -373,6 +401,51 @@ fn cmd_ast(file: &PathBuf) {
     };
 
     println!("{}", serde_json::to_string_pretty(&program).unwrap());
+}
+
+async fn cmd_keys(action: KeyAction) {
+    let db_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| "sqlite:anvil.db".to_string());
+    let pool = sqlx::sqlite::SqlitePool::connect(&db_url).await.expect("Failed to connect to database");
+
+    match action {
+        KeyAction::Add { key, owner, tier } => {
+            let key_id = key.unwrap_or_else(|| format!("anvil-{}-{}", owner, uuid::Uuid::new_v4().to_string()[..8].to_string()));
+            match sqlx::query!(
+                "INSERT INTO exergy_keys (key_id, owner_id, tier) VALUES (?, ?, ?)",
+                key_id, owner, tier
+            )
+            .execute(&pool)
+            .await {
+                Ok(_) => println!("  {} Added key: {} (Owner: {}, Tier: {})", "✓".bright_green(), key_id, owner, tier),
+                Err(e) => eprintln!("  {} Failed to add key: {}", "✗".bright_red(), e),
+            }
+        },
+        KeyAction::List => {
+            let rows = sqlx::query!("SELECT key_id, owner_id, tier, status FROM exergy_keys")
+                .fetch_all(&pool)
+                .await
+                .expect("Failed to fetch keys");
+            
+            println!("  {:<30} {:<15} {:<15} {:<10}", "KEY ID", "OWNER", "TIER", "STATUS");
+            println!("  {}", "-".repeat(80));
+            for row in rows {
+                println!("  {:<30} {:<15} {:<15} {:<10}", 
+                    row.key_id.as_deref().unwrap_or("UNKNOWN"), 
+                    row.owner_id, 
+                    row.tier.as_deref().unwrap_or("SOVEREIGN"), 
+                    row.status.as_deref().unwrap_or("ACTIVE")
+                );
+            }
+        },
+        KeyAction::Revoke { key } => {
+            match sqlx::query!("UPDATE exergy_keys SET status = 'REVOKED' WHERE key_id = ?", key)
+                .execute(&pool)
+                .await {
+                    Ok(_) => println!("  {} Revoked key: {}", "✓".bright_green(), key),
+                    Err(e) => eprintln!("  {} Failed to revoke key: {}", "✗".bright_red(), e),
+                }
+        }
+    }
 }
 
 #[cfg(test)]

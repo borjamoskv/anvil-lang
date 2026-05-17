@@ -5,7 +5,7 @@ edition = "2024"
 rust-version = "1.85"
 description = "Anvil — A programming language where trust doesn't compile."
 license = "MIT"
-authors = ["BorjaMoskv <borja@moskv.dev>"]
+authors = ["BorjaMoskv"]
 repository = "https://github.com/borjamoskv/anvil-lang"
 homepage = "https://github.com/borjamoskv/anvil-lang"
 keywords = ["formal-verification", "smart-contracts", "z3", "smt"]
@@ -47,9 +47,11 @@ sha2 = "0.10"
 sha3 = "0.10"
 hex = "0.4"
 chrono = "0.4"
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 
 # Observability
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 metrics = "0.24"
 metrics-exporter-prometheus = "0.16"
+uuid = { version = "1.23.1", features = ["v4"] }

@@ -1,6 +1,8 @@
 [profile.default]
 src = "contracts"
+test = "test"
 out = "out"
 libs = ["lib"]
 solc_version = "0.8.20"
-evm_version = "paris" # Safe for most chains, prevents PUSH0 issues if deploying on older L2s
+evm_version = "paris"
+fuzz = { runs = 256 }

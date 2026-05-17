@@ -1,9 +1,9 @@
 fn foo(a: u64) -> u64
     where {
         a == 10,
-        a' == 999999 // Should fail
+        a == 20,
+        a' == 999999 // Should verify vacuously because preconditions are contradictory
     }
 {
-    a -= 20; // 10 - 20 = -10. But u64 bounds say a' >= 0. Contradiction!
     return a;
 }

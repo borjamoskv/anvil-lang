@@ -138,6 +138,51 @@ fn gen_llvm_stmt(stmt: &Stmt, ret_ty: &str, vreg: &mut usize, labels: &mut usize
                     *vreg += 1;
                     out.push_str(&format!("  store i64 %{}, ptr %_{}\n", div_reg, target_name));
                 },
+                AssignOp::BitAndAssign => {
+                    out.push_str(&format!("  %{} = load i64, ptr %_{}\n", *vreg, target_name));
+                    let load_reg = *vreg;
+                    *vreg += 1;
+                    out.push_str(&format!("  %{} = and i64 %{}, {}\n", *vreg, load_reg, val_str));
+                    let op_reg = *vreg;
+                    *vreg += 1;
+                    out.push_str(&format!("  store i64 %{}, ptr %_{}\n", op_reg, target_name));
+                },
+                AssignOp::BitOrAssign => {
+                    out.push_str(&format!("  %{} = load i64, ptr %_{}\n", *vreg, target_name));
+                    let load_reg = *vreg;
+                    *vreg += 1;
+                    out.push_str(&format!("  %{} = or i64 %{}, {}\n", *vreg, load_reg, val_str));
+                    let op_reg = *vreg;
+                    *vreg += 1;
+                    out.push_str(&format!("  store i64 %{}, ptr %_{}\n", op_reg, target_name));
+                },
+                AssignOp::BitXorAssign => {
+                    out.push_str(&format!("  %{} = load i64, ptr %_{}\n", *vreg, target_name));
+                    let load_reg = *vreg;
+                    *vreg += 1;
+                    out.push_str(&format!("  %{} = xor i64 %{}, {}\n", *vreg, load_reg, val_str));
+                    let op_reg = *vreg;
+                    *vreg += 1;
+                    out.push_str(&format!("  store i64 %{}, ptr %_{}\n", op_reg, target_name));
+                },
+                AssignOp::ShlAssign => {
+                    out.push_str(&format!("  %{} = load i64, ptr %_{}\n", *vreg, target_name));
+                    let load_reg = *vreg;
+                    *vreg += 1;
+                    out.push_str(&format!("  %{} = shl i64 %{}, {}\n", *vreg, load_reg, val_str));
+                    let op_reg = *vreg;
+                    *vreg += 1;
+                    out.push_str(&format!("  store i64 %{}, ptr %_{}\n", op_reg, target_name));
+                },
+                AssignOp::ShrAssign => {
+                    out.push_str(&format!("  %{} = load i64, ptr %_{}\n", *vreg, target_name));
+                    let load_reg = *vreg;
+                    *vreg += 1;
+                    out.push_str(&format!("  %{} = lshr i64 %{}, {}\n", *vreg, load_reg, val_str));
+                    let op_reg = *vreg;
+                    *vreg += 1;
+                    out.push_str(&format!("  store i64 %{}, ptr %_{}\n", op_reg, target_name));
+                },
             }
         },
         Stmt::Return(Some(expr)) => {
@@ -302,6 +347,11 @@ fn gen_llvm_expr(expr: &Expr, vreg: usize, out: &mut String) -> (String, usize) 
                 BinOp::Mul => "mul",
                 BinOp::Div => "udiv",
                 BinOp::Mod => "urem",
+                BinOp::BitAnd => "and",
+                BinOp::BitOr => "or",
+                BinOp::BitXor => "xor",
+                BinOp::Shl => "shl",
+                BinOp::Shr => "lshr",
                 _ => {
                     // Comparison/logical ops — use icmp
                     let cmp_op = match op {

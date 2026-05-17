@@ -1,0 +1,3 @@
+[submodule "agents-archi-mvp/lib/forge-std"]
+	path = agents-archi-mvp/lib/forge-std
+	url = https://github.com/foundry-rs/forge-std
