@@ -6,7 +6,24 @@ from eth_account import Account
 # [Ω] C5-REAL Configuration
 RPC_URL = os.getenv("ARCHI_RPC_URL", "http://127.0.0.1:8545")
 PRIVATE_KEY = os.getenv("ARCHI_PRIVATE_KEY", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") # Default Anvil Account 0
-CONTRACT_ADDRESS = os.getenv("ARCHI_CONTRACT_ADDRESS", "0x5FbDB2315678afecb367f032d93F642f64180aa3") # Default Anvil Deployment
+
+# Load dynamic contract address from deployment config if exists
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CONFIG_PATH = os.path.join(BASE_DIR, "deployed_address.json")
+DEFAULT_ADDRESS = "0x5FbDB2315678afecb367f032d93F642f64180aa3"
+
+CONTRACT_ADDRESS = os.getenv("ARCHI_CONTRACT_ADDRESS")
+if not CONTRACT_ADDRESS:
+    if os.path.exists(CONFIG_PATH):
+        try:
+            with open(CONFIG_PATH, "r") as f:
+                cfg = json.load(f)
+                CONTRACT_ADDRESS = cfg.get("contract_address", DEFAULT_ADDRESS)
+                print(f"[Ω] Loaded deployed contract address: {CONTRACT_ADDRESS}")
+        except Exception:
+            CONTRACT_ADDRESS = DEFAULT_ADDRESS
+    else:
+        CONTRACT_ADDRESS = DEFAULT_ADDRESS
 
 ABI = [
     {
@@ -39,6 +56,7 @@ class RealAnchorer:
             self.account = Account.from_key(PRIVATE_KEY)
             self.contract = self.w3.eth.contract(address=CONTRACT_ADDRESS, abi=ABI)
             print(f"[Ω] Connected to ArchiLedger at {CONTRACT_ADDRESS}")
+
 
     def anchor(self, trace_hash: str, agent_id: str, domain: str = "audit"):
         """Executes a real transaction to anchor the trace hash."""
