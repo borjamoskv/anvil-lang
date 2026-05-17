@@ -45,7 +45,7 @@ impl Default for DirectSiliconCompiler {
 impl DirectSiliconCompiler {
     /// Aniquila la capa LLVM/Von Neumann. Compila invariantes
     /// directamente a RTL/Verilog.
-    pub fn compile_to_bitstream(&self, _ast: &crate::ast::Program) -> Result<Vec<u8>, String> {
+    pub fn compile_to_bitstream(&self, _ast: &crate::core::ast::Program) -> Result<Vec<u8>, String> {
         warn!("Singularity [2/4]: LLVM Bypassed. Iniciando síntesis de hardware directo para {}.", self.target_fabric);
         // TODO: Sintetizar AST a primitivas RTL.
         Ok(vec![0x00, 0x01, 0x02, 0x03]) // Dummy bitstream
@@ -57,7 +57,7 @@ pub struct DynamicInvariantGenerator;
 
 impl DynamicInvariantGenerator {
     /// Lee EVM Bytecode y deduce invariantes ocultos no declarados.
-    pub fn deduce_latent_invariants(_evm_bytecode: &[u8]) -> Vec<crate::ast::Invariant> {
+    pub fn deduce_latent_invariants(_evm_bytecode: &[u8]) -> Vec<crate::core::ast::Invariant> {
         info!("Singularity [3/4]: Analizando EVM bytecode ({} bytes) para deducir invariantes metacognitivos.", _evm_bytecode.len());
         // TODO: Algoritmo Genético sobre EVM OpCodes.
         vec![]

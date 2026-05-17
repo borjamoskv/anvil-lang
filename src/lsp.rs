@@ -1,9 +1,9 @@
 use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
-use crate::parser;
-use crate::typechecker;
-use crate::verifier;
+use crate::core::parser;
+use crate::core::typechecker;
+use crate::engine::verifier;
 
 #[derive(Debug)]
 pub struct Backend {
@@ -140,9 +140,9 @@ impl LanguageServer for Backend {
         // Check if hovering over a function definition
         if line_text.trim_start().starts_with("fn ") {
             // Parse the file to get invariant info
-            if let Ok(program) = crate::parser::parse_program(&text) {
+            if let Ok(program) = crate::core::parser::parse_program(&text) {
                 for item in &program.items {
-                    if let crate::ast::Item::Function(f) = item {
+                    if let crate::core::ast::Item::Function(f) = item {
                         if line_text.contains(&f.name) {
                             let inv_count = f.invariants.len();
                             let assume_count = f.assumes.len();

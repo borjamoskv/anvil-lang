@@ -4,7 +4,7 @@
 
 use pest::Parser;
 use pest_derive::Parser;
-use crate::ast::*;
+use crate::core::ast::*;
 
 #[derive(Parser)]
 #[grammar = "src/core/grammar.pest"]

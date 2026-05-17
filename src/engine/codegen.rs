@@ -4,7 +4,7 @@
 // needs ZERO runtime checks. Pure, proven logic.
 // ============================================================
 
-use crate::ast::*;
+use crate::core::ast::*;
 
 /// Generate Rust code from a verified Anvil program
 pub fn generate_rust(program: &Program) -> String {

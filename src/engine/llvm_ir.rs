@@ -6,7 +6,7 @@
 // Support for Structs, Arrays, and HashMaps via Alloca/Ptr.
 // ============================================================
 
-use crate::ast::*;
+use crate::core::ast::*;
 
 pub fn generate_llvm_ir(program: &Program) -> String {
     let mut out = String::new();

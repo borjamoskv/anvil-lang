@@ -8,7 +8,7 @@
 // Every unchecked cast is a thermodynamic lie.
 // ============================================================
 
-use crate::ast::*;
+use crate::core::ast::*;
 use colored::Colorize;
 use std::collections::HashMap;
 use tracing::debug;
@@ -579,7 +579,7 @@ pub fn print_type_report(env: &TypeEnv) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::parser;
+    use crate::core::parser;
 
     #[test]
     fn test_type_check_transfer() {

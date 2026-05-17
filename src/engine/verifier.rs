@@ -13,8 +13,8 @@
 
 use z3::ast::{Ast, BV, Bool};
 use z3::{Config, Context, SatResult, Solver, Tactic};
-use crate::ast::*;
-use crate::typechecker::{TypeEnv, ConstraintKind};
+use crate::core::ast::*;
+use crate::core::typechecker::{TypeEnv, ConstraintKind};
 use colored::Colorize;
 use sha3::{Digest, Sha3_256};
 use std::collections::{HashMap, HashSet};
