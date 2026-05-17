@@ -410,10 +410,12 @@ async fn cmd_keys(action: KeyAction) {
     match action {
         KeyAction::Add { key, owner, tier } => {
             let key_id = key.unwrap_or_else(|| format!("anvil-{}-{}", owner, uuid::Uuid::new_v4().to_string()[..8].to_string()));
-            match sqlx::query!(
-                "INSERT INTO exergy_keys (key_id, owner_id, tier) VALUES (?, ?, ?)",
-                key_id, owner, tier
+            match sqlx::query(
+                "INSERT INTO exergy_keys (key_id, owner_id, tier) VALUES (?, ?, ?)"
             )
+            .bind(&key_id)
+            .bind(&owner)
+            .bind(&tier)
             .execute(&pool)
             .await {
                 Ok(_) => println!("  {} Added key: {} (Owner: {}, Tier: {})", "✓".bright_green(), key_id, owner, tier),
@@ -421,24 +423,27 @@ async fn cmd_keys(action: KeyAction) {
             }
         },
         KeyAction::List => {
-            let rows = sqlx::query!("SELECT key_id, owner_id, tier, status FROM exergy_keys")
+            let rows = sqlx::query_as::<_, (Option<String>, String, Option<String>, Option<String>)>(
+                "SELECT key_id, owner_id, tier, status FROM exergy_keys"
+            )
                 .fetch_all(&pool)
                 .await
                 .expect("Failed to fetch keys");
             
             println!("  {:<30} {:<15} {:<15} {:<10}", "KEY ID", "OWNER", "TIER", "STATUS");
             println!("  {}", "-".repeat(80));
-            for row in rows {
+            for (key_id, owner_id, tier, status) in rows {
                 println!("  {:<30} {:<15} {:<15} {:<10}", 
-                    row.key_id.as_deref().unwrap_or("UNKNOWN"), 
-                    row.owner_id, 
-                    row.tier.as_deref().unwrap_or("SOVEREIGN"), 
-                    row.status.as_deref().unwrap_or("ACTIVE")
+                    key_id.as_deref().unwrap_or("UNKNOWN"), 
+                    owner_id, 
+                    tier.as_deref().unwrap_or("SOVEREIGN"), 
+                    status.as_deref().unwrap_or("ACTIVE")
                 );
             }
         },
         KeyAction::Revoke { key } => {
-            match sqlx::query!("UPDATE exergy_keys SET status = 'REVOKED' WHERE key_id = ?", key)
+            match sqlx::query("UPDATE exergy_keys SET status = 'REVOKED' WHERE key_id = ?")
+                .bind(&key)
                 .execute(&pool)
                 .await {
                     Ok(_) => println!("  {} Revoked key: {}", "✓".bright_green(), key),

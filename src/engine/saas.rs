@@ -188,18 +188,18 @@ async fn validate_key(
     axum::extract::State(pool): axum::extract::State<SqlitePool>,
     Json(payload): Json<AuthRequest>,
 ) -> impl IntoResponse {
-    let result = sqlx::query!(
-        "SELECT owner_id, tier FROM exergy_keys WHERE key_id = ? AND status = 'ACTIVE'",
-        payload.key
+    let result = sqlx::query_as::<_, (String, Option<String>)>(
+        "SELECT owner_id, tier FROM exergy_keys WHERE key_id = ? AND status = 'ACTIVE'"
     )
+    .bind(&payload.key)
     .fetch_optional(&pool)
     .await;
 
     match result {
-        Ok(Some(row)) => Json(AuthResponse {
+        Ok(Some((owner_id, tier))) => Json(AuthResponse {
             valid: true,
-            owner: Some(row.owner_id),
-            tier: Some(row.tier.unwrap_or_else(|| "SOVEREIGN".to_string())),
+            owner: Some(owner_id),
+            tier: Some(tier.unwrap_or_else(|| "SOVEREIGN".to_string())),
         }),
         _ => Json(AuthResponse {
             valid: false,
@@ -210,10 +210,10 @@ async fn validate_key(
 }
 
 pub async fn check_key_validity(pool: &SqlitePool, key: &str) -> bool {
-    sqlx::query!(
-        "SELECT status FROM exergy_keys WHERE key_id = ? AND status = 'ACTIVE'",
-        key
+    sqlx::query_scalar::<_, String>(
+        "SELECT status FROM exergy_keys WHERE key_id = ? AND status = 'ACTIVE'"
     )
+    .bind(key)
     .fetch_optional(pool)
     .await
     .map(|r| r.is_some())
