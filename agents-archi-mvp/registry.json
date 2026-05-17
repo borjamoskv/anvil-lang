@@ -1,0 +1,75 @@
+{
+    "timestamp": 1778606232.3432682,
+    "leaderboard": [
+        {
+            "name": "OSINT_SWARM_04",
+            "id": "0x882a...f2e1",
+            "score": 99.8,
+            "last_hash": "0x0b486af08600c1d4dc0b5b3cc9b4e20b4703b92172bfa287ed9ea8e162e3b4aa"
+        },
+        {
+            "name": "TRADER_ALPHA",
+            "id": "0x4f2e...8a92",
+            "score": 99.4,
+            "last_hash": "0x1a90bce5d27b218749d74362a7e2b81e14182dd779b2cb428482aa51893b7f6d"
+        },
+        {
+            "name": "COMPLIANCE_BOT",
+            "id": "0x11b3...c9d4",
+            "score": 98.7,
+            "last_hash": "0x83dbc080ecdc655d03ac4a9c13618ac45be11048505b6947b804b008dfe6ad23"
+        },
+        {
+            "name": "RESEARCH_NODE_12",
+            "id": "0x99e5...b3a1",
+            "score": 98.2,
+            "last_hash": "0x71429ae72face2ad9e61b3c9ed7318676443ae4f94bba823c9fcf514d0f2c711"
+        },
+        {
+            "name": "MARKET_MAKER_X",
+            "id": "0x22c4...e1f0",
+            "score": 97.9,
+            "last_hash": "0x82a9fd6d608f3f96efd5e519ed8fffadd6adc3b6596cab6035410d735aac33c5"
+        }
+    ],
+    "feed": [
+        {
+            "msg": "Agent OSINT_SWARM_04 verified. Trace Hash: 0x0b486af0...",
+            "status": "success"
+        },
+        {
+            "msg": "Agent TRADER_ALPHA verified. Trace Hash: 0x1a90bce5...",
+            "status": "success"
+        },
+        {
+            "msg": "Agent COMPLIANCE_BOT verified. Trace Hash: 0x83dbc080...",
+            "status": "success"
+        },
+        {
+            "msg": "Agent RESEARCH_NODE_12 verified. Trace Hash: 0x71429ae7...",
+            "status": "success"
+        },
+        {
+            "msg": "Agent MARKET_MAKER_X verified. Trace Hash: 0x82a9fd6d...",
+            "status": "success"
+        },
+        {
+            "msg": "REJECTED: Trace #9912 (Non-deterministic output detected)",
+            "status": "error"
+        }
+    ],
+    "traces": [
+        {
+            "agent_id": "CORTEX_REAPER_99",
+            "session_id": "session_3ad30f46",
+            "domain": "security_audit",
+            "timestamp": 1778674402.3126929,
+            "trace_hash": "0xc85d67f6d0f1a3d18a20927eee0bec7a446e9f067ec4cdab0d7a3a821aa3eb8e",
+            "state": "COMPLETED",
+            "onchain_tx": "0xsim_2e7efe36e0f54954386c60e8484dd6f79d831994",
+            "metadata": {
+                "execution_time_ms": 1245
+            }
+        }
+    ]
+}

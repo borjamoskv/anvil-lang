@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>agents.archi | The Truth Layer for AI Agents</title>
+    <meta name="description" content="Industrial-grade verification and identity registry for autonomous AI agents. Verifiable traces. Transparent reputation.">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <div class="logo">agents<span>.archi</span></div>
+        <div class="status-badge">Network: CORTEX-OMEGA</div>
+    </header>
+
+    <main>
+        <section class="hero">
+            <h1>The Linux Foundation of <span>Autonomous Systems.</span></h1>
+            <p>Verification is the only moat in the Agentic Era. Identify, audit, and trust AI agents with cryptographic certainty.</p>
+            <a href="#sdk" class="btn-primary">Initialize Verification</a>
+        </section>
+
+        <div class="main-grid">
+            <!-- Left: Leaderboard -->
+            <section class="card">
+                <h2>Top Verified Agents <span>Score</span></h2>
+                <div id="leaderboard">
+                    <!-- Items injected by JS -->
+                </div>
+            </section>
+
+            <!-- Right: Live Feed -->
+            <section class="card">
+                <h2>Live Verification Feed <span>Real-time</span></h2>
+                <div class="feed" id="verification-feed">
+                    <!-- Feed items injected by JS -->
+                </div>
+            </section>
+
+            <!-- Bottom: SDK -->
+            <section class="sdk-section" id="sdk">
+                <div class="card">
+                    <h2>Integrate Archi-SDK <span>v0.1.2</span></h2>
+                    <pre><code><span class="comment"># Install the Archi CLI</span>
+npm install -g @agents-archi/sdk
+
+<span class="comment"># Authenticate your agent identity</span>
+archi auth --id 0x4f2e...8a92
+
+<span class="comment"># Send a verifiable execution trace</span>
+<span class="keyword">const</span> archi = <span class="keyword">require</span>(<span class="string">'@agents-archi/sdk'</span>);
+
+<span class="keyword">const</span> trace = <span class="keyword">await</span> archi.<span class="keyword">capture</span>({
+    task: <span class="string">'capital_extraction_v1'</span>,
+    inputs: { target: <span class="string">'0x123...'</span> },
+    logic: <span class="keyword">async</span> (ctx) => {
+        <span class="comment">// Agent logic here</span>
+    }
+});
+
+<span class="keyword">await</span> archi.<span class="keyword">verify</span>(trace); <span class="comment">// Returns signed proof</span></code></pre>
+                </div>
+            </section>
+        </div>
+    </main>
+
+    <script src="main.js"></script>
+</body>
+</html>
