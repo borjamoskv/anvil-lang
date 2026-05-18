@@ -1,9 +1,9 @@
 {
-    "contract_address": "0x9fE46736679d2D9a65F0992F2272dE9f3c7fa6e0",
+    "contract_address": "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707",
     "rpc_url": "http://127.0.0.1:8545",
+    "deployment_timestamp": 1779071098,
     "deployer": "0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266",
-    "tx_hash": "0x1adb7d542b023a7094ccee5081a55150a76e4a15284e191dcca8369a6c135633",
+    "tx_hash": "31fde38911589d6077147d661d5dca0a8c21d68c0d610c4b5c2e0bfaa8c711fd",
     "network_id": 31337,
-    "reality_level": "C5-REAL",
-    "note": "Deployed on local Anvil via forge create --broadcast"
+    "reality_level": "C5-REAL"
 }
