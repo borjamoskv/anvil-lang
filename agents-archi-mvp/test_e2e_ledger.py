@@ -52,11 +52,13 @@ def main():
     print()
 
     # --- Step 1: Create deterministic trace hash ---
+    import time
     trace_payload = json.dumps({
         "agent_id": "E2E_TEST_AGENT",
         "task": "sovereign_verification",
         "inputs": {"target": "0xDEAD"},
         "outputs": {"status": "VERIFIED"},
+        "nonce": time.time()
     }, sort_keys=True, separators=(',', ':'))
     trace_hash_hex = hashlib.sha256(
         trace_payload.encode()
