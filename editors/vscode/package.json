@@ -35,7 +35,17 @@
         "scopeName": "source.anvil",
         "path": "./syntaxes/anvil.tmLanguage.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Anvil",
+      "properties": {
+        "anvil.server.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to a prebuilt Anvil binary to use for the language server."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

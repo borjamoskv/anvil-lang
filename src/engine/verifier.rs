@@ -11,15 +11,32 @@
 //    UNSAT → PROVEN
 // ============================================================
 
-use z3::ast::{Ast, BV, Bool};
-use z3::{Config, Context, SatResult, Solver, Tactic};
 use crate::core::ast::*;
-use crate::core::typechecker::{TypeEnv, ConstraintKind};
+use crate::core::typechecker::{ConstraintKind, TypeConstraint, TypeEnv};
 use colored::Colorize;
 use sha3::{Digest, Sha3_256};
 use std::collections::{HashMap, HashSet};
+use std::convert::TryInto;
 use std::time::Instant;
-use tracing::{info, warn, info_span};
+use tracing::{info, info_span, warn};
+use z3::ast::{Ast, BV, Bool};
+use z3::{Config, Context, FuncDecl, SatResult, Solver, Sort, Tactic};
+
+const SOLVER_BV_WIDTH: u32 = 256;
+pub const DEFAULT_SOLVER_TIMEOUT_MS: u64 = 5000;
+
+#[derive(Clone, Copy, Debug)]
+pub struct VerifyOptions {
+    pub timeout_ms: u64,
+}
+
+impl Default for VerifyOptions {
+    fn default() -> Self {
+        Self {
+            timeout_ms: DEFAULT_SOLVER_TIMEOUT_MS,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct VerifyResult {
@@ -36,32 +53,100 @@ pub struct VerifyResult {
     pub warnings: Vec<String>,
 }
 
+struct BodyEncoding<'ctx> {
+    modified: HashSet<String>,
+    current_vars: HashMap<String, BV<'ctx>>,
+    var_types: HashMap<String, Type>,
+    signed_vars: HashSet<String>,
+    failures: Vec<String>,
+    fresh_counter: usize,
+}
+
+impl<'ctx> BodyEncoding<'ctx> {
+    fn new(
+        current_vars: HashMap<String, BV<'ctx>>,
+        var_types: HashMap<String, Type>,
+        signed_vars: HashSet<String>,
+    ) -> Self {
+        Self {
+            modified: HashSet::new(),
+            current_vars,
+            var_types,
+            signed_vars,
+            failures: Vec::new(),
+            fresh_counter: 0,
+        }
+    }
+
+    fn fresh_bv(&mut self, ctx: &'ctx Context, prefix: &str) -> BV<'ctx> {
+        self.fresh_counter += 1;
+        BV::new_const(
+            ctx,
+            format!("{}_{}", prefix, self.fresh_counter).as_str(),
+            SOLVER_BV_WIDTH,
+        )
+    }
+
+    fn branch_from(&self, current_vars: HashMap<String, BV<'ctx>>) -> Self {
+        Self {
+            modified: HashSet::new(),
+            current_vars,
+            var_types: self.var_types.clone(),
+            signed_vars: self.signed_vars.clone(),
+            failures: Vec::new(),
+            fresh_counter: self.fresh_counter,
+        }
+    }
+
+    fn absorb_branch(&mut self, branch: BodyEncoding<'ctx>) {
+        self.fresh_counter = self.fresh_counter.max(branch.fresh_counter);
+        self.failures.extend(branch.failures);
+    }
+}
+
 pub fn verify_program(program: &Program, type_env: &TypeEnv) -> Vec<VerifyResult> {
+    verify_program_with_options(program, type_env, VerifyOptions::default())
+}
+
+pub fn verify_program_with_options(
+    program: &Program,
+    type_env: &TypeEnv,
+    options: VerifyOptions,
+) -> Vec<VerifyResult> {
     let mut results = Vec::new();
     let no_contract_invs: Vec<Invariant> = Vec::new();
     for item in &program.items {
         match item {
             Item::Function(f) if !f.invariants.is_empty() => {
-                results.push(verify_function(f, type_env, &no_contract_invs));
-            },
+                results.push(verify_function(f, type_env, &no_contract_invs, options));
+            }
             Item::Contract(c) => {
-                for f in c.functions.iter().filter(|f| !f.invariants.is_empty() || !c.invariants.is_empty()) {
-                    results.push(verify_function(f, type_env, &c.invariants));
+                for f in c
+                    .functions
+                    .iter()
+                    .filter(|f| !f.invariants.is_empty() || !c.invariants.is_empty())
+                {
+                    results.push(verify_function(f, type_env, &c.invariants, options));
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
     results
 }
 
-fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Invariant]) -> VerifyResult {
+fn verify_function(
+    func: &FnDef,
+    _type_env: &TypeEnv,
+    contract_invariants: &[Invariant],
+    options: VerifyOptions,
+) -> VerifyResult {
     let _span = info_span!("verify_function", fn_name = %func.name).entered();
     let start = Instant::now();
     let mut cfg = Config::new();
-    cfg.set_param_value("timeout", "5000"); // Dynamic timeout (5000ms) for division/rounding bounds
+    cfg.set_timeout_msec(options.timeout_ms);
     let ctx = Context::new(&cfg);
-    
+
     // Singularity [1/4]: Tensor-SMT Bypass Hook
     let _ = crate::singularity::TensorSMTEngine::default().guide_smt_search("verify_function_ctx");
 
@@ -75,17 +160,25 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
     // Create pre/post Z3 variables for all params
     let mut pre_vars: HashMap<String, BV> = HashMap::new();
     let mut post_vars: HashMap<String, BV> = HashMap::new();
+    let mut param_types: HashMap<String, Type> = HashMap::new();
 
     for param in &func.params {
-        let pre = BV::new_const(&ctx, param.name.as_str(), 64);
-        let post = BV::new_const(&ctx, format!("{}_post", param.name).as_str(), 64);
+        let pre = BV::new_const(&ctx, param.name.as_str(), SOLVER_BV_WIDTH);
+        let post = BV::new_const(
+            &ctx,
+            format!("{}_post", param.name).as_str(),
+            SOLVER_BV_WIDTH,
+        );
         pre_vars.insert(param.name.clone(), pre);
         post_vars.insert(param.name.clone(), post);
+        param_types.insert(param.name.clone(), param.ty.clone());
     }
 
     // Inject type constraints from the type checker
     // This bridges the gap between mathematical BV and silicon-bounded integers
-    inject_type_constraints(&ctx, &solver, &pre_vars, &post_vars, type_env);
+    let local_constraints = type_constraints_for_function(func);
+    inject_type_constraints(&ctx, &solver, &pre_vars, &post_vars, &local_constraints);
+    let signed_vars = signed_vars_from_constraints(&local_constraints);
 
     // Classify invariants: preconditions vs postconditions
     let mut preconditions = Vec::new();
@@ -107,33 +200,92 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
     // These are the Frontera Determinista: facts about the external environment
     // that the verifier accepts without proof (e.g., chain state, oracle prices)
     for assumption in &func.assumes {
-        if let Some(z3_assume) = invariant_to_z3(&ctx, &assumption.expr, &pre_vars, &post_vars) {
-            solver.assert(&z3_assume);
+        match invariant_to_z3(&ctx, &assumption.expr, &pre_vars, &post_vars, &signed_vars) {
+            Some(z3_assume) => solver.assert(&z3_assume),
+            None => {
+                return unverified_result(
+                    func,
+                    preconditions.len(),
+                    postconditions.len() + contract_invariants.len(),
+                    start,
+                    "Assumption could not be encoded safely",
+                );
+            }
         }
     }
 
     // Step 1: Assert preconditions (function-level)
     for pre in &preconditions {
-        if let Some(z3_pre) = invariant_to_z3(&ctx, &pre.expr, &pre_vars, &post_vars) {
-            solver.assert(&z3_pre);
+        match invariant_to_z3(&ctx, &pre.expr, &pre_vars, &post_vars, &signed_vars) {
+            Some(z3_pre) => solver.assert(&z3_pre),
+            None => {
+                return unverified_result(
+                    func,
+                    preconditions.len(),
+                    postconditions.len() + contract_invariants.len(),
+                    start,
+                    "Precondition could not be encoded safely",
+                );
+            }
         }
     }
 
     // Step 1b: Assert contract invariants hold in pre-state
     // (we assume the contract was in a valid state before this call)
     for inv in &contract_pre_invs {
-        if let Some(z3_inv) = invariant_to_z3(&ctx, &inv.expr, &pre_vars, &pre_vars) {
-            solver.assert(&z3_inv);
+        match invariant_to_z3(&ctx, &inv.expr, &pre_vars, &pre_vars, &signed_vars) {
+            Some(z3_inv) => solver.assert(&z3_inv),
+            None => {
+                return unverified_result(
+                    func,
+                    preconditions.len(),
+                    postconditions.len() + contract_invariants.len(),
+                    start,
+                    "Contract pre-invariant could not be encoded safely",
+                );
+            }
         }
     }
 
+    let pre_state_unsat = match solver.check() {
+        SatResult::Sat => false,
+        SatResult::Unsat => {
+            return unverified_result(
+                func,
+                preconditions.len(),
+                postconditions.len() + contract_invariants.len(),
+                start,
+                "Pre-state constraints are inconsistent; vacuous proof rejected",
+            );
+        }
+        SatResult::Unknown => {
+            return unverified_result(
+                func,
+                preconditions.len(),
+                postconditions.len() + contract_invariants.len(),
+                start,
+                "Pre-state constraints are undecidable",
+            );
+        }
+    };
+
     // Step 2: Encode body effects
-    let modified = encode_body_effects(&ctx, &solver, &func.body, &pre_vars, &post_vars);
+    let body_encoding = encode_body_effects(
+        &ctx,
+        &solver,
+        &func.body,
+        &pre_vars,
+        &post_vars,
+        &param_types,
+        &signed_vars,
+    );
 
     // Step 3: Frame rule — unmodified vars keep pre-state
-    for (name, pre) in &pre_vars {
-        if !modified.contains(name) {
-            if let Some(post) = post_vars.get(name) {
+    let mut pre_names: Vec<&String> = pre_vars.keys().collect();
+    pre_names.sort();
+    for name in pre_names {
+        if !body_encoding.modified.contains(name) {
+            if let (Some(pre), Some(post)) = (pre_vars.get(name), post_vars.get(name)) {
                 solver.assert(&post._eq(pre));
             }
         }
@@ -143,6 +295,37 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
     let mut all_verified = true;
     let mut counterexample = None;
     let mut global_invariants_checked = 0;
+    let mut proof_obligations = Vec::new();
+
+    if !pre_state_unsat && !body_encoding.failures.is_empty() {
+        all_verified = false;
+        counterexample = Some(format!(
+            "Body encoding failed:\n{}",
+            body_encoding.failures.join("\n")
+        ));
+    }
+
+    if !pre_state_unsat {
+        match solver.check() {
+            SatResult::Sat => {}
+            SatResult::Unsat => {
+                all_verified = false;
+                if counterexample.is_none() {
+                    counterexample = Some(
+                        "Body/type constraints are inconsistent for a satisfiable pre-state"
+                            .to_string(),
+                    );
+                }
+            }
+            SatResult::Unknown => {
+                all_verified = false;
+                if counterexample.is_none() {
+                    counterexample =
+                        Some("Body/type constraint consistency is undecidable".to_string());
+                }
+            }
+        }
+    }
 
     // Step 3.5: Global Conservation & Inflation Defense
     if let (Some(pre_assets), Some(pre_supply), Some(post_assets), Some(post_supply)) = (
@@ -152,6 +335,11 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
         post_vars.get("total_supply"),
     ) {
         global_invariants_checked += 2;
+        proof_obligations.push(
+            "global:share_inflation_defense:assets_decreased_implies_supply_decreased".to_string(),
+        );
+        proof_obligations
+            .push("global:conservation_ratio:pre_solvent_implies_post_solvent".to_string());
 
         // 1. Share Inflation Defense: if assets decreased, supply MUST have decreased
         solver.push();
@@ -159,22 +347,29 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
         let supply_decreased = post_supply.bvult(pre_supply);
         let inflation_defense = assets_decreased.implies(&supply_decreased);
         solver.assert(&inflation_defense.not());
-        
-        if let SatResult::Sat = solver.check() {
-            all_verified = false;
-            let mut ce = String::from("GLOBAL INVARIANT VIOLATED: Share Inflation detected! (Assets decreased but Supply did not)\n");
-            let model = solver.get_model().unwrap();
-            for (name, var) in &pre_vars {
-                if let Some(val) = model.eval(var, true) {
-                    ce.push_str(&format!("  {} = {}\n", name, val));
+
+        match solver.check() {
+            SatResult::Sat => {
+                all_verified = false;
+                let mut ce = String::from(
+                    "GLOBAL INVARIANT VIOLATED: Share Inflation detected! (Assets decreased but Supply did not)\n",
+                );
+                let model = solver.get_model().unwrap();
+                append_model_values(&mut ce, &model, &pre_vars, "");
+                append_model_values(&mut ce, &model, &post_vars, "'");
+                if counterexample.is_none() {
+                    counterexample = Some(ce);
                 }
             }
-            for (name, var) in &post_vars {
-                if let Some(val) = model.eval(var, true) {
-                    ce.push_str(&format!("  {}' = {}\n", name, val));
+            SatResult::Unsat => {}
+            SatResult::Unknown => {
+                all_verified = false;
+                if counterexample.is_none() {
+                    counterexample = Some(
+                        "Global invariant Share Inflation Defense: Z3 undecidable".to_string(),
+                    );
                 }
             }
-            if counterexample.is_none() { counterexample = Some(ce); }
         }
         solver.pop(1);
 
@@ -185,55 +380,64 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
         let conservation = pre_solvent.implies(&post_solvent);
         solver.assert(&conservation.not());
 
-        if let SatResult::Sat = solver.check() {
-            all_verified = false;
-            let mut ce = String::from("GLOBAL INVARIANT VIOLATED: Conservation ratio compromised! (Protocol became undercollateralized)\n");
-            let model = solver.get_model().unwrap();
-            for (name, var) in &pre_vars {
-                if let Some(val) = model.eval(var, true) {
-                    ce.push_str(&format!("  {} = {}\n", name, val));
+        match solver.check() {
+            SatResult::Sat => {
+                all_verified = false;
+                let mut ce = String::from(
+                    "GLOBAL INVARIANT VIOLATED: Conservation ratio compromised! (Protocol became undercollateralized)\n",
+                );
+                let model = solver.get_model().unwrap();
+                append_model_values(&mut ce, &model, &pre_vars, "");
+                append_model_values(&mut ce, &model, &post_vars, "'");
+                if counterexample.is_none() {
+                    counterexample = Some(ce);
                 }
             }
-            for (name, var) in &post_vars {
-                if let Some(val) = model.eval(var, true) {
-                    ce.push_str(&format!("  {}' = {}\n", name, val));
+            SatResult::Unsat => {}
+            SatResult::Unknown => {
+                all_verified = false;
+                if counterexample.is_none() {
+                    counterexample =
+                        Some("Global invariant Conservation Ratio: Z3 undecidable".to_string());
                 }
             }
-            if counterexample.is_none() { counterexample = Some(ce); }
         }
         solver.pop(1);
     }
 
-    let total_postconditions = postconditions.len() + contract_invariants.len() + global_invariants_checked;
+    let total_postconditions =
+        postconditions.len() + contract_invariants.len() + global_invariants_checked;
 
     // Step 4: Verify function postconditions
 
     for (i, post_inv) in postconditions.iter().enumerate() {
         solver.push();
-        if let Some(z3_post) = invariant_to_z3(&ctx, &post_inv.expr, &pre_vars, &post_vars) {
-            solver.assert(&z3_post.not());
-            match solver.check() {
-                SatResult::Sat => {
-                    all_verified = false;
-                    let model = solver.get_model().unwrap();
-                    let mut ce = format!("Postcondition #{} violated:\n", i + 1);
-                    for (name, var) in &pre_vars {
-                        if let Some(val) = model.eval(var, true) {
-                            ce.push_str(&format!("  {} = {}\n", name, val));
-                        }
+        match invariant_to_z3(&ctx, &post_inv.expr, &pre_vars, &post_vars, &signed_vars) {
+            Some(z3_post) => {
+                proof_obligations.push(format!("postcondition:{}:{:?}", i + 1, post_inv.expr));
+                solver.assert(&z3_post.not());
+                match solver.check() {
+                    SatResult::Sat => {
+                        all_verified = false;
+                        let model = solver.get_model().unwrap();
+                        let mut ce = format!("Postcondition #{} violated:\n", i + 1);
+                        append_model_values(&mut ce, &model, &pre_vars, "");
+                        append_model_values(&mut ce, &model, &post_vars, "'");
+                        counterexample = Some(ce);
                     }
-                    for (name, var) in &post_vars {
-                        if let Some(val) = model.eval(var, true) {
-                            ce.push_str(&format!("  {}' = {}\n", name, val));
-                        }
+                    SatResult::Unsat => { /* PROVEN */ }
+                    SatResult::Unknown => {
+                        all_verified = false;
+                        counterexample = Some(format!("Postcondition #{}: Z3 undecidable", i + 1));
                     }
-                    counterexample = Some(ce);
-                },
-                SatResult::Unsat => { /* PROVEN */ },
-                SatResult::Unknown => {
-                    all_verified = false;
-                    counterexample = Some(format!("Postcondition #{}: Z3 undecidable", i + 1));
-                },
+                }
+            }
+            None => {
+                all_verified = false;
+                counterexample = Some(format!(
+                    "Postcondition #{} could not be encoded safely",
+                    i + 1
+                ));
             }
         }
         solver.pop(1);
@@ -244,34 +448,49 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
         solver.push();
         // Contract invariants use post-state variables for both sides
         // because we're checking the state AFTER the function executes
-        if let Some(z3_inv) = invariant_to_z3(&ctx, &contract_inv.expr, &post_vars, &post_vars) {
-            solver.assert(&z3_inv.not());
-            match solver.check() {
-                SatResult::Sat => {
-                    all_verified = false;
-                    let model = solver.get_model().unwrap();
-                    let mut ce = format!("Contract invariant #{} violated:\n", i + 1);
-                    for (name, var) in &pre_vars {
-                        if let Some(val) = model.eval(var, true) {
-                            ce.push_str(&format!("  {} = {}\n", name, val));
+        match invariant_to_z3(
+            &ctx,
+            &contract_inv.expr,
+            &post_vars,
+            &post_vars,
+            &signed_vars,
+        ) {
+            Some(z3_inv) => {
+                proof_obligations.push(format!(
+                    "contract_invariant:{}:{:?}",
+                    i + 1,
+                    contract_inv.expr
+                ));
+                solver.assert(&z3_inv.not());
+                match solver.check() {
+                    SatResult::Sat => {
+                        all_verified = false;
+                        let model = solver.get_model().unwrap();
+                        let mut ce = format!("Contract invariant #{} violated:\n", i + 1);
+                        append_model_values(&mut ce, &model, &pre_vars, "");
+                        append_model_values(&mut ce, &model, &post_vars, "'");
+                        if counterexample.is_none() {
+                            counterexample = Some(ce);
                         }
                     }
-                    for (name, var) in &post_vars {
-                        if let Some(val) = model.eval(var, true) {
-                            ce.push_str(&format!("  {}' = {}\n", name, val));
+                    SatResult::Unsat => { /* PROVEN — contract invariant preserved */ }
+                    SatResult::Unknown => {
+                        all_verified = false;
+                        if counterexample.is_none() {
+                            counterexample =
+                                Some(format!("Contract invariant #{}: Z3 undecidable", i + 1));
                         }
                     }
-                    if counterexample.is_none() {
-                        counterexample = Some(ce);
-                    }
-                },
-                SatResult::Unsat => { /* PROVEN — contract invariant preserved */ },
-                SatResult::Unknown => {
-                    all_verified = false;
-                    if counterexample.is_none() {
-                        counterexample = Some(format!("Contract invariant #{}: Z3 undecidable", i + 1));
-                    }
-                },
+                }
+            }
+            None => {
+                all_verified = false;
+                if counterexample.is_none() {
+                    counterexample = Some(format!(
+                        "Contract invariant #{} could not be encoded safely",
+                        i + 1
+                    ));
+                }
             }
         }
         solver.pop(1);
@@ -281,10 +500,24 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
     // This is the cryptographic anchor that CORTEX-Persist uses to link
     // a persisted fact back to the Z3 proof that justified it.
     let proof_hash = {
-        let assertions = solver.get_assertions();
+        let mut assertions: Vec<String> = solver
+            .get_assertions()
+            .iter()
+            .map(|assertion| format!("{}", assertion))
+            .collect();
+        assertions.sort();
+        proof_obligations.sort();
+
         let mut hasher = Sha3_256::new();
-        for assertion in assertions.iter() {
-            hasher.update(format!("{}", assertion).as_bytes());
+        for assertion in assertions {
+            hasher.update(b"assertion:");
+            hasher.update(assertion.as_bytes());
+            hasher.update([0]);
+        }
+        for obligation in proof_obligations {
+            hasher.update(b"obligation:");
+            hasher.update(obligation.as_bytes());
+            hasher.update([0]);
         }
         hex::encode(hasher.finalize())
     };
@@ -319,17 +552,62 @@ fn verify_function(func: &FnDef, type_env: &TypeEnv, contract_invariants: &[Inva
     result
 }
 
+fn unverified_result(
+    func: &FnDef,
+    preconditions_count: usize,
+    postconditions_count: usize,
+    start: Instant,
+    reason: &str,
+) -> VerifyResult {
+    let mut hasher = Sha3_256::new();
+    hasher.update(func.name.as_bytes());
+    hasher.update([0]);
+    hasher.update(reason.as_bytes());
+
+    VerifyResult {
+        fn_name: func.name.clone(),
+        invariants_checked: func.invariants.len(),
+        preconditions_count,
+        postconditions_count,
+        verified: false,
+        counterexample: Some(reason.to_string()),
+        duration_ms: start.elapsed().as_secs_f64() * 1000.0,
+        proof_hash: hex::encode(hasher.finalize()),
+        warnings: Vec::new(),
+    }
+}
+
+fn append_model_values<'ctx>(
+    output: &mut String,
+    model: &z3::Model<'ctx>,
+    vars: &HashMap<String, BV<'ctx>>,
+    suffix: &str,
+) {
+    let mut names: Vec<&String> = vars.keys().collect();
+    names.sort();
+    for name in names {
+        if let Some(var) = vars.get(name) {
+            if let Some(val) = model.eval(var, true) {
+                output.push_str(&format!("  {}{} = {}\n", name, suffix, val));
+            }
+        }
+    }
+}
+
 // --- Invariant classification ---
 
 fn invariant_uses_post(inv: &InvariantExpr) -> bool {
     match inv {
-        InvariantExpr::Comparison { left, right, .. } =>
-            inv_term_uses_post(left) || inv_term_uses_post(right),
-        InvariantExpr::And(a, b) | InvariantExpr::Or(a, b) =>
-            invariant_uses_post(a) || invariant_uses_post(b),
+        InvariantExpr::Comparison { left, right, .. } => {
+            inv_term_uses_post(left) || inv_term_uses_post(right)
+        }
+        InvariantExpr::And(a, b) | InvariantExpr::Or(a, b) => {
+            invariant_uses_post(a) || invariant_uses_post(b)
+        }
         InvariantExpr::Not(a) => invariant_uses_post(a),
-        InvariantExpr::Forall { body, .. } | InvariantExpr::Exists { body, .. } =>
-            invariant_uses_post(body),
+        InvariantExpr::Forall { body, .. } | InvariantExpr::Exists { body, .. } => {
+            invariant_uses_post(body)
+        }
         InvariantExpr::True => false,
     }
 }
@@ -337,10 +615,178 @@ fn invariant_uses_post(inv: &InvariantExpr) -> bool {
 fn inv_term_uses_post(term: &InvTerm) -> bool {
     match term {
         InvTerm::Var { is_post, .. } | InvTerm::FieldAccess { is_post, .. } => *is_post,
-        InvTerm::BinOp { left, right, .. } =>
-            inv_term_uses_post(left) || inv_term_uses_post(right),
+        InvTerm::BinOp { left, right, .. } => inv_term_uses_post(left) || inv_term_uses_post(right),
         InvTerm::FnCall { args, .. } => args.iter().any(inv_term_uses_post),
-        InvTerm::Literal(_) => false,
+        InvTerm::Literal(_) | InvTerm::BigLiteral(_) => false,
+    }
+}
+
+fn signed_vars_from_constraints(constraints: &[TypeConstraint]) -> HashSet<String> {
+    constraints
+        .iter()
+        .filter_map(|constraint| match constraint.kind {
+            ConstraintKind::SignedBound { .. } => Some(constraint.var_name.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+fn type_constraints_for_function(func: &FnDef) -> Vec<TypeConstraint> {
+    func.params
+        .iter()
+        .flat_map(|param| type_constraints_for_binding(&param.name, &param.ty))
+        .collect()
+}
+
+fn type_constraints_for_binding(name: &str, ty: &Type) -> Vec<TypeConstraint> {
+    let mut constraints = Vec::new();
+    match ty {
+        Type::U8 => {
+            push_nonnegative_constraint(&mut constraints, name);
+            push_upper_constraint(&mut constraints, name, 8);
+        }
+        Type::U16 => {
+            push_nonnegative_constraint(&mut constraints, name);
+            push_upper_constraint(&mut constraints, name, 16);
+        }
+        Type::U32 => {
+            push_nonnegative_constraint(&mut constraints, name);
+            push_upper_constraint(&mut constraints, name, 32);
+        }
+        Type::U64 | Type::Gas => {
+            push_nonnegative_constraint(&mut constraints, name);
+            push_upper_constraint(&mut constraints, name, 64);
+        }
+        Type::U128 => {
+            push_nonnegative_constraint(&mut constraints, name);
+            push_upper_constraint(&mut constraints, name, 128);
+        }
+        Type::U256 | Type::Wallet | Type::TxHash => {
+            push_nonnegative_constraint(&mut constraints, name);
+            push_upper_constraint(&mut constraints, name, 256);
+        }
+        Type::I8 => push_signed_constraint(&mut constraints, name, 8),
+        Type::I16 => push_signed_constraint(&mut constraints, name, 16),
+        Type::I32 => push_signed_constraint(&mut constraints, name, 32),
+        Type::I64 => push_signed_constraint(&mut constraints, name, 64),
+        Type::I128 => push_signed_constraint(&mut constraints, name, 128),
+        _ => {}
+    }
+
+    constraints
+}
+
+fn push_nonnegative_constraint(constraints: &mut Vec<TypeConstraint>, name: &str) {
+    constraints.push(TypeConstraint {
+        var_name: name.to_string(),
+        kind: ConstraintKind::NonNegative,
+    });
+}
+
+fn push_upper_constraint(constraints: &mut Vec<TypeConstraint>, name: &str, bits: u32) {
+    constraints.push(TypeConstraint {
+        var_name: name.to_string(),
+        kind: ConstraintKind::UpperBound { bits },
+    });
+}
+
+fn push_signed_constraint(constraints: &mut Vec<TypeConstraint>, name: &str, bits: u32) {
+    constraints.push(TypeConstraint {
+        var_name: name.to_string(),
+        kind: ConstraintKind::SignedBound { bits },
+    });
+}
+
+fn type_is_signed(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+    )
+}
+
+fn type_rank_for_verifier(ty: &Type) -> u32 {
+    match ty {
+        Type::U8 | Type::I8 => 1,
+        Type::U16 | Type::I16 => 2,
+        Type::U32 | Type::I32 => 3,
+        Type::U64 | Type::I64 => 4,
+        Type::U128 | Type::I128 => 5,
+        Type::U256 => 6,
+        _ => 0,
+    }
+}
+
+fn promote_types_for_verifier(a: &Type, b: &Type) -> Type {
+    if type_rank_for_verifier(a) >= type_rank_for_verifier(b) {
+        a.clone()
+    } else {
+        b.clone()
+    }
+}
+
+fn infer_negated_expr_type_for_verifier(
+    expr: &Expr,
+    var_types: &HashMap<String, Type>,
+) -> Option<Type> {
+    match expr {
+        Expr::IntLit(n) if *n >= 0 && *n <= 128 => Some(Type::I8),
+        Expr::IntLit(n) if *n >= 0 && *n <= 32768 => Some(Type::I16),
+        Expr::IntLit(n) if *n >= 0 && *n <= 2147483648 => Some(Type::I32),
+        Expr::IntLit(n) if *n >= 0 && *n <= 9223372036854775808_i128 => Some(Type::I64),
+        Expr::IntLit(_) => Some(Type::I128),
+        Expr::BigIntLit(n) if decimal_lte(n, I128_MIN_ABS_DEC) => Some(Type::I128),
+        Expr::BigIntLit(_) => None,
+        _ => infer_expr_type_for_verifier(expr, var_types).filter(type_is_signed),
+    }
+}
+
+fn infer_expr_type_for_verifier(expr: &Expr, var_types: &HashMap<String, Type>) -> Option<Type> {
+    match expr {
+        Expr::IntLit(n) => {
+            if *n >= 0 && *n <= 255 {
+                Some(Type::U8)
+            } else if *n >= 0 && *n <= 65535 {
+                Some(Type::U16)
+            } else if *n >= 0 && *n <= 4294967295 {
+                Some(Type::U32)
+            } else if *n >= 0 && *n <= u64::MAX as i128 {
+                Some(Type::U64)
+            } else if *n >= 0 {
+                Some(Type::U128)
+            } else if *n >= i64::MIN as i128 {
+                Some(Type::I64)
+            } else {
+                Some(Type::I128)
+            }
+        }
+        Expr::BigIntLit(_) | Expr::HexLit(_) => Some(Type::U256),
+        Expr::BoolLit(_) => Some(Type::Bool),
+        Expr::StringLit(_) => Some(Type::String),
+        Expr::AddressLit(_) => Some(Type::Address),
+        Expr::Ident(name) => var_types.get(name).cloned(),
+        Expr::BinOp { left, op, right } => match op {
+            BinOp::Eq
+            | BinOp::Neq
+            | BinOp::Lt
+            | BinOp::Gt
+            | BinOp::Lte
+            | BinOp::Gte
+            | BinOp::And
+            | BinOp::Or => Some(Type::Bool),
+            _ => match (
+                infer_expr_type_for_verifier(left, var_types),
+                infer_expr_type_for_verifier(right, var_types),
+            ) {
+                (Some(left), Some(right)) => Some(promote_types_for_verifier(&left, &right)),
+                (Some(ty), None) | (None, Some(ty)) => Some(ty),
+                _ => None,
+            },
+        },
+        Expr::UnaryOp { op, operand } => match op {
+            UnaryOp::Not => Some(Type::Bool),
+            UnaryOp::Neg => infer_negated_expr_type_for_verifier(operand, var_types),
+        },
+        _ => None,
     }
 }
 
@@ -355,72 +801,194 @@ fn encode_body_effects<'ctx>(
     body: &Block,
     pre_vars: &HashMap<String, BV<'ctx>>,
     post_vars: &HashMap<String, BV<'ctx>>,
-) -> HashSet<String> {
-    let mut modified = HashSet::new();
-    // Track the "current value" of each variable as we walk through statements
-    // Initially, current[x] = pre_vars[x]. After assignment, current[x] = new Z3 var.
-    let mut current_vars: HashMap<String, BV<'ctx>> = pre_vars.clone();
-    // SSA counter per variable
-    let mut ssa_counters: HashMap<String, usize> = HashMap::new();
+    param_types: &HashMap<String, Type>,
+    signed_vars: &HashSet<String>,
+) -> BodyEncoding<'ctx> {
+    let mut encoding =
+        BodyEncoding::new(pre_vars.clone(), param_types.clone(), signed_vars.clone());
+    encode_block(ctx, solver, body, &mut encoding);
 
+    // Final step: connect the last SSA value of each modified variable to post_var.
+    // This must happen once at the top level; recursive if/loop encoding must never
+    // assert branch-local effects directly against post-state variables.
+    let mut modified_names: Vec<&String> = encoding.modified.iter().collect();
+    modified_names.sort();
+    for name in modified_names {
+        if let (Some(final_val), Some(post_var)) =
+            (encoding.current_vars.get(name), post_vars.get(name))
+        {
+            solver.assert(&post_var._eq(final_val));
+        }
+    }
+
+    encoding
+}
+
+fn encode_block<'ctx>(
+    ctx: &'ctx Context,
+    solver: &Solver<'ctx>,
+    body: &Block,
+    encoding: &mut BodyEncoding<'ctx>,
+) {
     for stmt in &body.stmts {
         match stmt {
             Stmt::Assign { target, op, value } => {
-                if let Some(current) = match target {
-                    LValue::Ident(name) => current_vars.get(name).cloned().map(|c| (name, c)),
-                    _ => None,
-                } {
-                    let (name, current) = current;
-                    // Evaluate the RHS using current variable values (not pre!)
-                    let encoded = match op {
-                        AssignOp::Assign => expr_to_z3(ctx, value, &current_vars),
-                        AssignOp::AddAssign => expr_to_z3(ctx, value, &current_vars)
+                if let LValue::Ident(name) = target {
+                    if let Some(current) = encoding.current_vars.get(name).cloned() {
+                        let target_is_signed = encoding.signed_vars.contains(name);
+                        // Evaluate the RHS using current variable values (not pre!)
+                        let encoded = match op {
+                            AssignOp::Assign => expr_to_z3(
+                                ctx,
+                                value,
+                                &encoding.current_vars,
+                                &encoding.signed_vars,
+                            ),
+                            AssignOp::AddAssign => expr_to_z3(
+                                ctx,
+                                value,
+                                &encoding.current_vars,
+                                &encoding.signed_vars,
+                            )
                             .map(|v| current.bvadd(&v)),
-                        AssignOp::SubAssign => expr_to_z3(ctx, value, &current_vars)
+                            AssignOp::SubAssign => expr_to_z3(
+                                ctx,
+                                value,
+                                &encoding.current_vars,
+                                &encoding.signed_vars,
+                            )
                             .map(|v| current.bvsub(&v)),
-                        AssignOp::MulAssign => expr_to_z3(ctx, value, &current_vars)
+                            AssignOp::MulAssign => expr_to_z3(
+                                ctx,
+                                value,
+                                &encoding.current_vars,
+                                &encoding.signed_vars,
+                            )
                             .map(|v| current.bvmul(&v)),
-                        AssignOp::DivAssign => expr_to_z3(ctx, value, &current_vars)
-                            .map(|v| current.bvudiv(&v)),
-                        AssignOp::BitAndAssign => expr_to_z3(ctx, value, &current_vars)
+                            AssignOp::DivAssign => expr_to_z3(
+                                ctx,
+                                value,
+                                &encoding.current_vars,
+                                &encoding.signed_vars,
+                            )
+                            .map(|v| {
+                                if target_is_signed
+                                    || expr_uses_signed_var(value, &encoding.signed_vars)
+                                {
+                                    current.bvsdiv(&v)
+                                } else {
+                                    current.bvudiv(&v)
+                                }
+                            }),
+                            AssignOp::BitAndAssign => expr_to_z3(
+                                ctx,
+                                value,
+                                &encoding.current_vars,
+                                &encoding.signed_vars,
+                            )
                             .map(|v| current.bvand(&v)),
-                        AssignOp::BitOrAssign => expr_to_z3(ctx, value, &current_vars)
+                            AssignOp::BitOrAssign => expr_to_z3(
+                                ctx,
+                                value,
+                                &encoding.current_vars,
+                                &encoding.signed_vars,
+                            )
                             .map(|v| current.bvor(&v)),
-                        AssignOp::BitXorAssign => expr_to_z3(ctx, value, &current_vars)
+                            AssignOp::BitXorAssign => expr_to_z3(
+                                ctx,
+                                value,
+                                &encoding.current_vars,
+                                &encoding.signed_vars,
+                            )
                             .map(|v| current.bvxor(&v)),
-                        AssignOp::ShlAssign => expr_to_z3(ctx, value, &current_vars)
+                            AssignOp::ShlAssign => expr_to_z3(
+                                ctx,
+                                value,
+                                &encoding.current_vars,
+                                &encoding.signed_vars,
+                            )
                             .map(|v| current.bvshl(&v)),
-                        AssignOp::ShrAssign => expr_to_z3(ctx, value, &current_vars)
-                            .map(|v| current.bvlshr(&v)),
-                    };
+                            AssignOp::ShrAssign => expr_to_z3(
+                                ctx,
+                                value,
+                                &encoding.current_vars,
+                                &encoding.signed_vars,
+                            )
+                            .map(|v| {
+                                if target_is_signed {
+                                    current.bvashr(&v)
+                                } else {
+                                    current.bvlshr(&v)
+                                }
+                            }),
+                        };
 
-                    if let Some(result) = encoded {
-                        // Create intermediate SSA variable
-                        let counter = ssa_counters.entry(name.clone()).or_insert(0);
-                        *counter += 1;
+                        if let Some(result) = encoded {
+                            let ssa_var = encoding.fresh_bv(ctx, &format!("{}_ssa", name));
 
-                        let ssa_name = format!("{}_ssa_{}", name, counter);
-                        let ssa_var = BV::new_const(ctx, ssa_name.as_str(), 64);
+                            // Assert: ssa_var == computed_result
+                            solver.assert(&ssa_var._eq(&result));
 
-                        // Assert: ssa_var == computed_result
-                        solver.assert(&ssa_var._eq(&result));
-
-                        // Update current value to the new SSA variable
-                        current_vars.insert(name.clone(), ssa_var);
-                        modified.insert(name.clone());
+                            // Update current value to the new SSA variable
+                            encoding.current_vars.insert(name.clone(), ssa_var);
+                            encoding.modified.insert(name.clone());
+                        } else {
+                            encoding.failures.push(format!(
+                                "Assignment to '{}' could not be encoded safely",
+                                name
+                            ));
+                        }
+                    } else {
+                        encoding.failures.push(format!(
+                            "Assignment to unknown variable '{}' could not be encoded",
+                            name
+                        ));
                     }
+                } else {
+                    encoding.failures.push(format!(
+                        "Assignment target {:?} is not supported by the verifier",
+                        target
+                    ));
                 }
-            },
-            Stmt::Let { name, value, .. } => {
+            }
+            Stmt::Let {
+                name, ty, value, ..
+            } => {
                 // Local variable: create a Z3 variable and bind it
-                if let Some(z3_val) = expr_to_z3(ctx, value, &current_vars) {
-                    let local_var = BV::new_const(ctx, format!("local_{}", name).as_str(), 64);
+                if let Some(z3_val) =
+                    expr_to_z3(ctx, value, &encoding.current_vars, &encoding.signed_vars)
+                {
+                    let local_var =
+                        BV::new_const(ctx, format!("local_{}", name).as_str(), SOLVER_BV_WIDTH);
                     solver.assert(&local_var._eq(&z3_val));
-                    
-                    current_vars.insert(name.clone(), local_var);
+                    if let Some(binding_ty) = ty
+                        .clone()
+                        .or_else(|| infer_expr_type_for_verifier(value, &encoding.var_types))
+                    {
+                        if type_is_signed(&binding_ty) {
+                            encoding.signed_vars.insert(name.clone());
+                        }
+                        inject_constraints_for_var(
+                            ctx,
+                            solver,
+                            &local_var,
+                            &type_constraints_for_binding(name, &binding_ty),
+                        );
+                        encoding.var_types.insert(name.clone(), binding_ty);
+                    }
+
+                    encoding.current_vars.insert(name.clone(), local_var);
+                } else {
+                    encoding
+                        .failures
+                        .push(format!("let '{}' could not be encoded safely", name));
                 }
-            },
-            Stmt::While { condition, invariants, body } => {
+            }
+            Stmt::While {
+                condition,
+                invariants,
+                body,
+            } => {
                 // Inductive loop verification:
                 // 1. Havoc all variables modified in the loop body
                 //    (replace with fresh unconstrained Z3 vars)
@@ -428,104 +996,325 @@ fn encode_body_effects<'ctx>(
                 // 3. Assert ¬condition (loop has exited)
                 // 4. The function's postconditions verify the desired property
 
-                // Collect variables modified in the loop body
-                let loop_modified = collect_modified_vars(&body);
+                let loop_modified = collect_modified_vars(body);
 
-                // Havoc: create fresh Z3 vars for all loop-modified variables
-                for var_name in &loop_modified {
-                    let havoc_name = format!("{}_loop_exit", var_name);
-                    let havoc_var = BV::new_const(ctx, havoc_name.as_str(), 64);
-                    current_vars.insert(var_name.clone(), havoc_var);
-                    modified.insert(var_name.clone());
+                // Prove loop invariants are true before entering the loop.
+                for (i, inv) in invariants.iter().enumerate() {
+                    match invariant_to_z3_with_current(
+                        ctx,
+                        &inv.expr,
+                        &encoding.current_vars,
+                        &encoding.signed_vars,
+                    ) {
+                        Some(z3_inv) => {
+                            solver.push();
+                            solver.assert(&z3_inv.not());
+                            match solver.check() {
+                                SatResult::Unsat => {}
+                                SatResult::Sat => encoding.failures.push(format!(
+                                    "Loop invariant #{} is not established before the loop",
+                                    i + 1
+                                )),
+                                SatResult::Unknown => encoding.failures.push(format!(
+                                    "Loop invariant #{} establishment is undecidable",
+                                    i + 1
+                                )),
+                            }
+                            solver.pop(1);
+                        }
+                        None => encoding.failures.push(format!(
+                            "Loop invariant #{} could not be encoded safely",
+                            i + 1
+                        )),
+                    }
                 }
 
-                // Assume loop invariants hold at exit
-                for inv in invariants {
-                    if let Some(z3_inv) = invariant_to_z3_with_current(ctx, &inv.expr, &current_vars) {
-                        solver.assert(&z3_inv);
+                if !invariants.is_empty() {
+                    let loop_entry_vars = encoding.current_vars.clone();
+                    let mut preservation_encoding = encoding.branch_from(loop_entry_vars.clone());
+
+                    solver.push();
+                    for inv in invariants {
+                        if let Some(z3_inv) = invariant_to_z3_with_current(
+                            ctx,
+                            &inv.expr,
+                            &loop_entry_vars,
+                            &encoding.signed_vars,
+                        ) {
+                            solver.assert(&z3_inv);
+                        }
                     }
+
+                    match condition_to_z3(ctx, condition, &loop_entry_vars, &encoding.signed_vars) {
+                        Some(loop_cond) => solver.assert(&loop_cond),
+                        None => encoding
+                            .failures
+                            .push("Loop condition could not be encoded safely".to_string()),
+                    }
+
+                    encode_block(ctx, solver, body, &mut preservation_encoding);
+                    encoding.fresh_counter = encoding
+                        .fresh_counter
+                        .max(preservation_encoding.fresh_counter);
+                    for failure in &preservation_encoding.failures {
+                        encoding
+                            .failures
+                            .push(format!("Loop body preservation failed: {}", failure));
+                    }
+
+                    for (i, inv) in invariants.iter().enumerate() {
+                        match invariant_to_z3_with_current(
+                            ctx,
+                            &inv.expr,
+                            &preservation_encoding.current_vars,
+                            &encoding.signed_vars,
+                        ) {
+                            Some(z3_inv) => {
+                                solver.push();
+                                solver.assert(&z3_inv.not());
+                                match solver.check() {
+                                    SatResult::Unsat => {}
+                                    SatResult::Sat => encoding.failures.push(format!(
+                                        "Loop invariant #{} is not preserved by the loop body",
+                                        i + 1
+                                    )),
+                                    SatResult::Unknown => encoding.failures.push(format!(
+                                        "Loop invariant #{} preservation is undecidable",
+                                        i + 1
+                                    )),
+                                }
+                                solver.pop(1);
+                            }
+                            None => encoding.failures.push(format!(
+                                "Loop invariant #{} could not be encoded after the loop body",
+                                i + 1
+                            )),
+                        }
+                    }
+                    solver.pop(1);
+                }
+
+                // Conservative loop summary. We do not assume user-provided loop invariants
+                // unless they were established and preserved above; variables not described by
+                // invariants remain unconstrained at loop exit.
+                // Havoc: create fresh Z3 vars for all loop-modified variables
+                let mut loop_modified_names: Vec<&String> = loop_modified.iter().collect();
+                loop_modified_names.sort();
+                for var_name in loop_modified_names {
+                    let havoc_name = format!("{}_loop_exit", var_name);
+                    let havoc_var = BV::new_const(ctx, havoc_name.as_str(), SOLVER_BV_WIDTH);
+                    encoding.current_vars.insert(var_name.clone(), havoc_var);
+                    encoding.modified.insert(var_name.clone());
                 }
 
                 // Assert ¬condition: the loop has exited
                 // Encode the loop condition as a Z3 Bool and negate it
-                if let Some(exit_cond) = condition_to_z3(ctx, condition, &current_vars) {
+                if let Some(exit_cond) = condition_to_z3(
+                    ctx,
+                    condition,
+                    &encoding.current_vars,
+                    &encoding.signed_vars,
+                ) {
                     solver.assert(&exit_cond.not());
+                } else {
+                    encoding
+                        .failures
+                        .push("Loop condition could not be encoded safely".to_string());
                 }
-            },
-            Stmt::If { condition, then_block, else_block } => {
-                if let Some(cond_z3) = condition_to_z3(ctx, condition, &current_vars) {
-                    let saved_current = current_vars.clone();
-                    
+
+                for inv in invariants {
+                    if let Some(z3_inv) = invariant_to_z3_with_current(
+                        ctx,
+                        &inv.expr,
+                        &encoding.current_vars,
+                        &encoding.signed_vars,
+                    ) {
+                        solver.assert(&z3_inv);
+                    }
+                }
+            }
+            Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                if let Some(cond_z3) = condition_to_z3(
+                    ctx,
+                    condition,
+                    &encoding.current_vars,
+                    &encoding.signed_vars,
+                ) {
+                    let saved_current = encoding.current_vars.clone();
+
+                    // If the condition is statically true/false, only encode the reachable branch.
+                    if let Expr::BoolLit(take_then) = condition {
+                        let selected = if *take_then {
+                            Some(then_block)
+                        } else {
+                            else_block.as_ref()
+                        };
+
+                        if let Some(block) = selected {
+                            let mut selected_encoding = encoding.branch_from(saved_current.clone());
+                            encode_block(ctx, solver, block, &mut selected_encoding);
+                            let selected_modified = selected_encoding.modified.clone();
+                            let selected_current = selected_encoding.current_vars.clone();
+                            encoding.absorb_branch(selected_encoding);
+
+                            if encoding.failures.is_empty() {
+                                encoding.current_vars = saved_current;
+                                let mut selected_modified_names: Vec<String> =
+                                    selected_modified.into_iter().collect();
+                                selected_modified_names.sort();
+                                for var_name in selected_modified_names {
+                                    if let Some(value) = selected_current.get(&var_name) {
+                                        encoding
+                                            .current_vars
+                                            .insert(var_name.clone(), value.clone());
+                                        encoding.modified.insert(var_name);
+                                    }
+                                }
+                            }
+                        }
+                        continue;
+                    }
+
                     // 1. Encode 'then' branch
-                    let then_modified = encode_body_effects(ctx, solver, then_block, pre_vars, post_vars);
-                    let then_current = current_vars.clone();
-                    
+                    let mut then_encoding = encoding.branch_from(saved_current.clone());
+                    encode_block(ctx, solver, then_block, &mut then_encoding);
+                    let then_modified = then_encoding.modified.clone();
+                    let then_current = then_encoding.current_vars.clone();
+
                     // 2. Encode 'else' branch
-                    current_vars = saved_current.clone();
-                    let else_modified = if let Some(eb) = else_block {
-                        encode_body_effects(ctx, solver, eb, pre_vars, post_vars)
-                    } else {
-                        HashSet::new()
-                    };
-                    let else_current = current_vars.clone();
-                    
+                    let mut else_encoding = encoding.branch_from(saved_current.clone());
+                    else_encoding.fresh_counter = then_encoding.fresh_counter;
+                    if let Some(eb) = else_block {
+                        encode_block(ctx, solver, eb, &mut else_encoding);
+                    }
+                    let else_modified = else_encoding.modified.clone();
+                    let else_current = else_encoding.current_vars.clone();
+
+                    encoding.absorb_branch(then_encoding);
+                    encoding.absorb_branch(else_encoding);
+
+                    if !encoding.failures.is_empty() {
+                        encoding.current_vars = saved_current;
+                        continue;
+                    }
+
                     // 3. Merge branches using ITE
-                    let all_modified: HashSet<_> = then_modified.union(&else_modified).cloned().collect();
-                    current_vars = saved_current.clone(); // Start merge from baseline
-                    
+                    let mut all_modified: Vec<String> =
+                        then_modified.union(&else_modified).cloned().collect();
+                    all_modified.sort();
+                    encoding.current_vars = saved_current.clone(); // Start merge from baseline
+
                     for var_name in all_modified {
-                        let val_then = then_current.get(&var_name).cloned().unwrap_or_else(|| saved_current.get(&var_name).cloned().unwrap());
-                        let val_else = else_current.get(&var_name).cloned().unwrap_or_else(|| saved_current.get(&var_name).cloned().unwrap());
-                        
-                        let ssa_counter = ssa_counters.entry(var_name.clone()).or_insert(0);
-                        *ssa_counter += 1;
-                        let merge_name = format!("{}_ssa_if_{}", var_name, ssa_counter);
-                        let merge_var = BV::new_const(ctx, merge_name.as_str(), 64);
-                        
+                        let val_then = then_current
+                            .get(&var_name)
+                            .cloned()
+                            .unwrap_or_else(|| saved_current.get(&var_name).cloned().unwrap());
+                        let val_else = else_current
+                            .get(&var_name)
+                            .cloned()
+                            .unwrap_or_else(|| saved_current.get(&var_name).cloned().unwrap());
+
+                        let merge_var = encoding.fresh_bv(ctx, &format!("{}_ssa_if", var_name));
+
                         // merge_var = cond ? val_then : val_else
                         solver.assert(&merge_var._eq(&cond_z3.ite(&val_then, &val_else)));
-                        
-                        current_vars.insert(var_name.clone(), merge_var);
-                        modified.insert(var_name.clone());
+
+                        encoding.current_vars.insert(var_name.clone(), merge_var);
+                        encoding.modified.insert(var_name.clone());
                     }
                 } else {
-                    // Fallback to havoc if condition can't be encoded
-                    let then_modified = collect_modified_vars(then_block);
-                    let else_modified = else_block.as_ref().map(collect_modified_vars).unwrap_or_default();
-                    for var_name in then_modified.union(&else_modified) {
-                        let havoc_name = format!("{}_if_havoc", var_name);
-                        let havoc_var = BV::new_const(ctx, havoc_name.as_str(), 64);
-                        current_vars.insert(var_name.clone(), havoc_var);
-                        modified.insert(var_name.clone());
-                    }
+                    encoding
+                        .failures
+                        .push("If condition could not be encoded safely".to_string());
                 }
-            },
-            Stmt::Ghost { name, value, .. } => {
+            }
+            Stmt::Ghost {
+                name, ty, value, ..
+            } => {
                 // Ghost variables exist only in the proof domain.
                 // Create a Z3 variable and bind it to the expression value.
                 // These are NOT compiled to silicon — they exist for Z3 reasoning only.
-                if let Some(z3_val) = expr_to_z3(ctx, value, &current_vars) {
-                    let ghost_var = BV::new_const(ctx, format!("ghost_{}", name).as_str(), 64);
+                if let Some(z3_val) =
+                    expr_to_z3(ctx, value, &encoding.current_vars, &encoding.signed_vars)
+                {
+                    let ghost_var =
+                        BV::new_const(ctx, format!("ghost_{}", name).as_str(), SOLVER_BV_WIDTH);
                     solver.assert(&ghost_var._eq(&z3_val));
-                    current_vars.insert(name.clone(), ghost_var);
+                    if type_is_signed(ty) {
+                        encoding.signed_vars.insert(name.clone());
+                    }
+                    inject_constraints_for_var(
+                        ctx,
+                        solver,
+                        &ghost_var,
+                        &type_constraints_for_binding(name, ty),
+                    );
+                    encoding.var_types.insert(name.clone(), ty.clone());
+                    encoding.current_vars.insert(name.clone(), ghost_var);
+                } else {
+                    encoding
+                        .failures
+                        .push(format!("ghost '{}' could not be encoded safely", name));
                 }
-            },
+            }
+            Stmt::Assert { condition, message } => {
+                match condition_to_z3(
+                    ctx,
+                    condition,
+                    &encoding.current_vars,
+                    &encoding.signed_vars,
+                ) {
+                    Some(cond) => {
+                        solver.push();
+                        solver.assert(&cond.not());
+                        match solver.check() {
+                            SatResult::Unsat => {
+                                solver.pop(1);
+                                solver.assert(&cond);
+                            }
+                            SatResult::Sat => {
+                                solver.pop(1);
+                                let label = message
+                                    .as_deref()
+                                    .map(|m| format!(": {}", m))
+                                    .unwrap_or_default();
+                                encoding
+                                    .failures
+                                    .push(format!("assertion can fail{}", label));
+                            }
+                            SatResult::Unknown => {
+                                solver.pop(1);
+                                encoding
+                                    .failures
+                                    .push("assertion is undecidable".to_string());
+                            }
+                        }
+                    }
+                    None => encoding
+                        .failures
+                        .push("assertion could not be encoded safely".to_string()),
+                }
+            }
             Stmt::Emit { .. } => {
                 // Emit statements have no effect on Z3 verification state.
                 // They are on-chain event markers, compiled to LOG opcodes.
-            },
+            }
+            Stmt::Expr(expr) if expr_contains_fncall(expr) => {
+                encoding.failures.push(
+                    "Function-call expression statements are not modeled by the verifier"
+                        .to_string(),
+                );
+            }
+            Stmt::Expr(_) => {
+                // Pure expression statements have no effect on the verification state.
+            }
             _ => {} // Return, etc. — no effect on Z3 state
         }
     }
-
-    // Final step: connect the last SSA value of each modified variable to post_var
-    for name in &modified {
-        if let (Some(final_val), Some(post_var)) = (current_vars.get(name), post_vars.get(name)) {
-            solver.assert(&post_var._eq(final_val));
-        }
-    }
-
-    modified
 }
 
 // Collect all variable names that are assigned in a block
@@ -533,21 +1322,26 @@ fn collect_modified_vars(block: &Block) -> HashSet<String> {
     let mut modified = HashSet::new();
     for stmt in &block.stmts {
         match stmt {
-            Stmt::Assign { target, .. } => {
-                if let LValue::Ident(name) = target {
-                    modified.insert(name.clone());
-                }
-            },
+            Stmt::Assign {
+                target: LValue::Ident(name),
+                ..
+            } => {
+                modified.insert(name.clone());
+            }
             Stmt::While { body, .. } => {
                 modified.extend(collect_modified_vars(body));
-            },
-            Stmt::If { then_block, else_block, .. } => {
+            }
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
                 modified.extend(collect_modified_vars(then_block));
                 if let Some(eb) = else_block {
                     modified.extend(collect_modified_vars(eb));
                 }
-            },
-            _ => {},
+            }
+            _ => {}
         }
     }
     modified
@@ -556,61 +1350,64 @@ fn collect_modified_vars(block: &Block) -> HashSet<String> {
 // Evaluate invariant expression using a single set of "current" variables
 // Used for loop invariants where we don't have a pre/post split
 fn invariant_to_z3_with_current<'ctx>(
-    ctx: &'ctx Context, inv: &InvariantExpr, vars: &HashMap<String, BV<'ctx>>,
+    ctx: &'ctx Context,
+    inv: &InvariantExpr,
+    vars: &HashMap<String, BV<'ctx>>,
+    signed_vars: &HashSet<String>,
 ) -> Option<Bool<'ctx>> {
     // Reuse the standard invariant_to_z3 by passing current vars as both pre and post
-    invariant_to_z3(ctx, inv, vars, vars)
+    invariant_to_z3(ctx, inv, vars, vars, signed_vars)
 }
 
 // Convert an Anvil Expr (used as a condition) to a Z3 Bool
 // Handles comparisons like `counter > 0`, `i <= n`, and identifier-based conditions
 fn condition_to_z3<'ctx>(
-    ctx: &'ctx Context, expr: &Expr, vars: &HashMap<String, BV<'ctx>>,
+    ctx: &'ctx Context,
+    expr: &Expr,
+    vars: &HashMap<String, BV<'ctx>>,
+    signed_vars: &HashSet<String>,
 ) -> Option<Bool<'ctx>> {
     match expr {
-        Expr::BinOp { left, op, right } => {
-            match op {
-                BinOp::Gt | BinOp::Lt | BinOp::Gte | BinOp::Lte | BinOp::Eq | BinOp::Neq => {
-                    let l = expr_to_z3(ctx, left, vars)?;
-                    let r = expr_to_z3(ctx, right, vars)?;
-                    Some(match op {
-                        BinOp::Gt => l.bvugt(&r),
-                        BinOp::Lt => l.bvult(&r),
-                        BinOp::Gte => l.bvuge(&r),
-                        BinOp::Lte => l.bvule(&r),
-                        BinOp::Eq => l._eq(&r).into(),
-                        BinOp::Neq => l._eq(&r).not(),
-                        _ => unreachable!(),
-                    })
-                },
-                BinOp::And => {
-                    let l = condition_to_z3(ctx, left, vars)?;
-                    let r = condition_to_z3(ctx, right, vars)?;
-                    Some(Bool::and(ctx, &[&l, &r]))
-                },
-                BinOp::Or => {
-                    let l = condition_to_z3(ctx, left, vars)?;
-                    let r = condition_to_z3(ctx, right, vars)?;
-                    Some(Bool::or(ctx, &[&l, &r]))
-                },
-                _ => None,
+        Expr::BinOp { left, op, right } => match op {
+            BinOp::Gt | BinOp::Lt | BinOp::Gte | BinOp::Lte | BinOp::Eq | BinOp::Neq => {
+                let signed = expr_comparison_is_signed(left, right, signed_vars);
+                if signed && (!signed_expr_literals_safe(left) || !signed_expr_literals_safe(right))
+                {
+                    return None;
+                }
+                let l = expr_to_z3(ctx, left, vars, signed_vars)?;
+                let r = expr_to_z3(ctx, right, vars, signed_vars)?;
+                Some(compare_expr_bv(&l, op, &r, signed))
             }
+            BinOp::And => {
+                let l = condition_to_z3(ctx, left, vars, signed_vars)?;
+                let r = condition_to_z3(ctx, right, vars, signed_vars)?;
+                Some(Bool::and(ctx, &[&l, &r]))
+            }
+            BinOp::Or => {
+                let l = condition_to_z3(ctx, left, vars, signed_vars)?;
+                let r = condition_to_z3(ctx, right, vars, signed_vars)?;
+                Some(Bool::or(ctx, &[&l, &r]))
+            }
+            _ => None,
         },
         Expr::BoolLit(b) => Some(Bool::from_bool(ctx, *b)),
         Expr::Ident(name) => {
             // Boolean identifier: treat as `name != 0`
             if let Some(var) = vars.get(name.as_str()) {
-                let zero = BV::from_i64(ctx, 0, 64);
+                let zero = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH);
                 Some(var._eq(&zero).not())
             } else {
-                // Unknown boolean — create as fresh Bool constant
-                Some(Bool::new_const(ctx, name.as_str()))
+                None
             }
-        },
-        Expr::UnaryOp { op: UnaryOp::Not, operand } => {
-            let inner = condition_to_z3(ctx, operand, vars)?;
+        }
+        Expr::UnaryOp {
+            op: UnaryOp::Not,
+            operand,
+        } => {
+            let inner = condition_to_z3(ctx, operand, vars, signed_vars)?;
             Some(inner.not())
-        },
+        }
         _ => None,
     }
 }
@@ -619,61 +1416,120 @@ fn condition_to_z3<'ctx>(
 // Bridges the thermodynamic gap: Z3 Int is unbounded, but silicon is not.
 // u64 has exactly 2^64 states. Every bit beyond that is a lie.
 
+fn decimal_pow2(exp: u32) -> String {
+    let mut digits = vec![1u8];
+    for _ in 0..exp {
+        let mut carry = 0u8;
+        for digit in &mut digits {
+            let doubled = *digit * 2 + carry;
+            *digit = doubled % 10;
+            carry = doubled / 10;
+        }
+        if carry > 0 {
+            digits.push(carry);
+        }
+    }
+    digits.iter().rev().map(|d| char::from(b'0' + *d)).collect()
+}
+
+const I128_MIN_ABS_DEC: &str = "170141183460469231731687303715884105728";
+
+fn canonical_decimal(s: &str) -> String {
+    let trimmed = s.trim_start_matches('0');
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn decimal_lte(a: &str, b: &str) -> bool {
+    let a = canonical_decimal(a);
+    let b = canonical_decimal(b);
+    a.len() < b.len() || (a.len() == b.len() && a <= b)
+}
+
+fn bv_from_i128<'ctx>(ctx: &'ctx Context, value: i128) -> Option<BV<'ctx>> {
+    if value >= 0 {
+        BV::from_str(ctx, SOLVER_BV_WIDTH, &value.to_string())
+    } else {
+        let magnitude = BV::from_str(ctx, SOLVER_BV_WIDTH, &value.unsigned_abs().to_string())?;
+        Some(BV::from_i64(ctx, 0, SOLVER_BV_WIDTH).bvsub(&magnitude))
+    }
+}
+
+fn bv_from_decimal<'ctx>(ctx: &'ctx Context, value: &str) -> Option<BV<'ctx>> {
+    let trimmed = value.trim();
+    let magnitude = trimmed.strip_prefix('-').unwrap_or(trimmed);
+    let bv = BV::from_str(ctx, SOLVER_BV_WIDTH, magnitude)?;
+    if trimmed.starts_with('-') {
+        Some(BV::from_i64(ctx, 0, SOLVER_BV_WIDTH).bvsub(&bv))
+    } else {
+        Some(bv)
+    }
+}
+
+fn bv_pow2<'ctx>(ctx: &'ctx Context, bits: u32) -> Option<BV<'ctx>> {
+    BV::from_str(ctx, SOLVER_BV_WIDTH, &decimal_pow2(bits))
+}
+
 fn inject_type_constraints<'ctx>(
     ctx: &'ctx Context,
     solver: &Solver<'ctx>,
     pre_vars: &HashMap<String, BV<'ctx>>,
     post_vars: &HashMap<String, BV<'ctx>>,
-    type_env: &TypeEnv,
+    constraints: &[TypeConstraint],
 ) {
-    let zero = BV::from_i64(ctx, 0, 64);
+    let zero = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH);
 
-    for constraint in &type_env.constraints {
+    for constraint in constraints {
         // Apply to pre-state variable
         if let Some(pre_var) = pre_vars.get(&constraint.var_name) {
-            match &constraint.kind {
-                ConstraintKind::NonNegative => {
-                    solver.assert(&pre_var.bvuge(&zero));
-                }
-                ConstraintKind::UpperBound { bits } => {
-                    if *bits < 64 {
-                        let upper = BV::from_u64(ctx, 1u64 << bits, 64);
-                        solver.assert(&pre_var.bvult(&upper));
-                    }
-                }
-                ConstraintKind::SignedBound { bits } => {
-                    if *bits < 64 {
-                        let half = 1i64 << (bits - 1);
-                        let lower = BV::from_i64(ctx, -half, 64);
-                        let upper = BV::from_i64(ctx, half, 64);
-                        solver.assert(&pre_var.bvsge(&lower));
-                        solver.assert(&pre_var.bvslt(&upper));
-                    }
-                }
-            }
+            inject_constraint_for_var(ctx, solver, pre_var, constraint, &zero);
         }
 
         // Apply to post-state variable (the result must also be in bounds)
         if let Some(post_var) = post_vars.get(&constraint.var_name) {
-            match &constraint.kind {
-                ConstraintKind::NonNegative => {
-                    solver.assert(&post_var.bvuge(&zero));
-                }
-                ConstraintKind::UpperBound { bits } => {
-                    if *bits < 64 {
-                        let upper = BV::from_u64(ctx, 1u64 << bits, 64);
-                        solver.assert(&post_var.bvult(&upper));
-                    }
-                }
-                ConstraintKind::SignedBound { bits } => {
-                    if *bits < 64 {
-                        let half = 1i64 << (bits - 1);
-                        let lower = BV::from_i64(ctx, -half, 64);
-                        let upper = BV::from_i64(ctx, half, 64);
-                        solver.assert(&post_var.bvsge(&lower));
-                        solver.assert(&post_var.bvslt(&upper));
-                    }
-                }
+            inject_constraint_for_var(ctx, solver, post_var, constraint, &zero);
+        }
+    }
+}
+
+fn inject_constraints_for_var<'ctx>(
+    ctx: &'ctx Context,
+    solver: &Solver<'ctx>,
+    var: &BV<'ctx>,
+    constraints: &[TypeConstraint],
+) {
+    let zero = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH);
+    for constraint in constraints {
+        inject_constraint_for_var(ctx, solver, var, constraint, &zero);
+    }
+}
+
+fn inject_constraint_for_var<'ctx>(
+    ctx: &'ctx Context,
+    solver: &Solver<'ctx>,
+    var: &BV<'ctx>,
+    constraint: &TypeConstraint,
+    zero: &BV<'ctx>,
+) {
+    match &constraint.kind {
+        ConstraintKind::NonNegative => {
+            solver.assert(&var.bvuge(zero));
+        }
+        ConstraintKind::UpperBound { bits } => {
+            if *bits < SOLVER_BV_WIDTH {
+                let upper = bv_pow2(ctx, *bits).unwrap();
+                solver.assert(&var.bvult(&upper));
+            }
+        }
+        ConstraintKind::SignedBound { bits } => {
+            if *bits < SOLVER_BV_WIDTH {
+                let upper = bv_pow2(ctx, *bits - 1).unwrap();
+                let lower = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH).bvsub(&upper);
+                solver.assert(&var.bvsge(&lower));
+                solver.assert(&var.bvslt(&upper));
             }
         }
     }
@@ -682,100 +1538,127 @@ fn inject_type_constraints<'ctx>(
 // --- Z3 translation ---
 
 fn expr_to_z3<'ctx>(
-    ctx: &'ctx Context, expr: &Expr, vars: &HashMap<String, BV<'ctx>>,
+    ctx: &'ctx Context,
+    expr: &Expr,
+    vars: &HashMap<String, BV<'ctx>>,
+    signed_vars: &HashSet<String>,
 ) -> Option<BV<'ctx>> {
     match expr {
-        Expr::IntLit(n) => {
-            // Handle large literals: fall back to 0 if out of 64-bit bounds
-            if *n >= i64::MIN as i128 && *n <= i64::MAX as i128 {
-                Some(BV::from_i64(ctx, *n as i64, 64))
-            } else if *n >= u64::MIN as i128 && *n <= u64::MAX as i128 {
-                Some(BV::from_u64(ctx, *n as u64, 64))
-            } else {
-                Some(BV::from_i64(ctx, 0, 64))
-            }
-        },
+        Expr::IntLit(n) => bv_from_i128(ctx, *n),
+        Expr::BigIntLit(n) => bv_from_decimal(ctx, n),
         Expr::BoolLit(b) => {
             // Encode booleans as integers: true=1, false=0
-            Some(BV::from_i64(ctx, if *b { 1 } else { 0 }, 64))
-        },
+            Some(BV::from_i64(ctx, if *b { 1 } else { 0 }, SOLVER_BV_WIDTH))
+        }
         Expr::Ident(name) => vars.get(name.trim()).cloned(),
         Expr::BinOp { left, op, right } => {
             match op {
                 // Arithmetic operations
-                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod | BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
-                    let l = expr_to_z3(ctx, left, vars)?;
-                    let r = expr_to_z3(ctx, right, vars)?;
+                BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Mod
+                | BinOp::BitAnd
+                | BinOp::BitOr
+                | BinOp::BitXor
+                | BinOp::Shl
+                | BinOp::Shr => {
+                    let signed = expr_comparison_is_signed(left, right, signed_vars);
+                    if signed
+                        && (!signed_expr_literals_safe(left) || !signed_expr_literals_safe(right))
+                    {
+                        return None;
+                    }
+                    let l = expr_to_z3(ctx, left, vars, signed_vars)?;
+                    let r = expr_to_z3(ctx, right, vars, signed_vars)?;
                     Some(match op {
                         BinOp::Add => l.bvadd(&r),
                         BinOp::Sub => l.bvsub(&r),
                         BinOp::Mul => l.bvmul(&r),
+                        BinOp::Div if signed => l.bvsdiv(&r),
                         BinOp::Div => l.bvudiv(&r),
+                        BinOp::Mod if signed => l.bvsrem(&r),
                         BinOp::Mod => l.bvurem(&r),
+                        BinOp::BitAnd => l.bvand(&r),
+                        BinOp::BitOr => l.bvor(&r),
+                        BinOp::BitXor => l.bvxor(&r),
+                        BinOp::Shl => l.bvshl(&r),
+                        BinOp::Shr => l.bvlshr(&r),
                         _ => unreachable!(),
                     })
-                },
+                }
                 // Comparison/logical operations → encode as 0/1 integer
-                BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt
-                | BinOp::Lte | BinOp::Gte | BinOp::And | BinOp::Or => {
+                BinOp::Eq
+                | BinOp::Neq
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::Lte
+                | BinOp::Gte
+                | BinOp::And
+                | BinOp::Or => {
                     // These produce boolean results; encode as if-then-else: cond ? 1 : 0
-                    let one = BV::from_i64(ctx, 1, 64);
-                    let z = BV::from_i64(ctx, 0, 64);
+                    let one = BV::from_i64(ctx, 1, SOLVER_BV_WIDTH);
+                    let z = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH);
                     match op {
-                        BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt
-                        | BinOp::Lte | BinOp::Gte => {
-                            let l = expr_to_z3(ctx, left, vars)?;
-                            let r = expr_to_z3(ctx, right, vars)?;
-                            let cond = match op {
-                                BinOp::Eq => l._eq(&r),
-                                BinOp::Neq => l._eq(&r).not(),
-                                BinOp::Lt => l.bvult(&r),
-                                BinOp::Gt => l.bvugt(&r),
-                                BinOp::Lte => l.bvule(&r),
-                                BinOp::Gte => l.bvuge(&r),
-                                _ => unreachable!(),
-                            };
+                        BinOp::Eq
+                        | BinOp::Neq
+                        | BinOp::Lt
+                        | BinOp::Gt
+                        | BinOp::Lte
+                        | BinOp::Gte => {
+                            let signed = expr_comparison_is_signed(left, right, signed_vars);
+                            if signed
+                                && (!signed_expr_literals_safe(left)
+                                    || !signed_expr_literals_safe(right))
+                            {
+                                return None;
+                            }
+                            let l = expr_to_z3(ctx, left, vars, signed_vars)?;
+                            let r = expr_to_z3(ctx, right, vars, signed_vars)?;
+                            let cond = compare_expr_bv(&l, op, &r, signed);
                             Some(cond.ite(&one, &z))
-                        },
+                        }
                         BinOp::And => {
-                            let l = expr_to_z3(ctx, left, vars)?;
-                            let r = expr_to_z3(ctx, right, vars)?;
+                            let l = expr_to_z3(ctx, left, vars, signed_vars)?;
+                            let r = expr_to_z3(ctx, right, vars, signed_vars)?;
                             let l_bool = l._eq(&z).not();
                             let r_bool = r._eq(&z).not();
                             let both = Bool::and(ctx, &[&l_bool, &r_bool]);
                             Some(both.ite(&one, &z))
-                        },
+                        }
                         BinOp::Or => {
-                            let l = expr_to_z3(ctx, left, vars)?;
-                            let r = expr_to_z3(ctx, right, vars)?;
+                            let l = expr_to_z3(ctx, left, vars, signed_vars)?;
+                            let r = expr_to_z3(ctx, right, vars, signed_vars)?;
                             let l_bool = l._eq(&z).not();
                             let r_bool = r._eq(&z).not();
                             let either = Bool::or(ctx, &[&l_bool, &r_bool]);
                             Some(either.ite(&one, &z))
-                        },
+                        }
                         _ => None,
                     }
-                },
+                }
             }
-        },
+        }
         Expr::UnaryOp { op, operand } => {
-            let val = expr_to_z3(ctx, operand, vars)?;
+            let val = expr_to_z3(ctx, operand, vars, signed_vars)?;
             match op {
-                UnaryOp::Neg => Some(BV::from_i64(ctx, 0, 64).bvsub(&val)),
+                UnaryOp::Neg => Some(BV::from_i64(ctx, 0, SOLVER_BV_WIDTH).bvsub(&val)),
                 UnaryOp::Not => {
-                    let z = BV::from_i64(ctx, 0, 64);
-                    let one = BV::from_i64(ctx, 1, 64);
+                    let z = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH);
+                    let one = BV::from_i64(ctx, 1, SOLVER_BV_WIDTH);
                     let is_zero = val._eq(&z);
                     Some(is_zero.ite(&one, &z))
-                },
+                }
             }
-        },
+        }
         Expr::FnCall { name, args } => {
-            // Uninterpreted function: create a fresh Z3 constant
-            // This is sound (conservative) — the function could return any value
-            let fresh_name = format!("__fn_{}_{}", name, args.len());
-            Some(BV::new_const(ctx, fresh_name.as_str(), 64))
-        },
+            let z3_args: Option<Vec<BV<'ctx>>> = args
+                .iter()
+                .map(|arg| expr_to_z3(ctx, arg, vars, signed_vars))
+                .collect();
+            apply_uninterpreted_bv_fn(ctx, name, &z3_args?)
+        }
         Expr::FieldAccess { object, field } => {
             // Field access: encode as {object}_{field} variable lookup
             let obj_name = match object.as_ref() {
@@ -784,44 +1667,354 @@ fn expr_to_z3<'ctx>(
             };
             let composite = format!("{}_{}", obj_name, field);
             vars.get(&composite).cloned()
-                .or_else(|| Some(BV::new_const(ctx, composite.as_str(), 64)))
-        },
+        }
         _ => None,
     }
 }
 
+fn apply_uninterpreted_bv_fn<'ctx>(
+    ctx: &'ctx Context,
+    name: &str,
+    args: &[BV<'ctx>],
+) -> Option<BV<'ctx>> {
+    let bv_sort = Sort::bitvector(ctx, SOLVER_BV_WIDTH);
+    let domain_sorts: Vec<Sort<'ctx>> = (0..args.len())
+        .map(|_| Sort::bitvector(ctx, SOLVER_BV_WIDTH))
+        .collect();
+    let domain_refs: Vec<&Sort<'ctx>> = domain_sorts.iter().collect();
+    let decl = FuncDecl::new(
+        ctx,
+        format!("__fn_{}_arity_{}", sanitize_symbol(name), args.len()),
+        &domain_refs,
+        &bv_sort,
+    );
+    let arg_refs: Vec<&dyn Ast<'ctx>> = args.iter().map(|arg| arg as &dyn Ast<'ctx>).collect();
+    decl.apply(&arg_refs).try_into().ok()
+}
+
+fn sanitize_symbol(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn signed_expr_literals_safe(expr: &Expr) -> bool {
+    match expr {
+        Expr::BigIntLit(n) => decimal_lte(n, I128_MIN_ABS_DEC),
+        Expr::BinOp { left, right, .. } => {
+            signed_expr_literals_safe(left) && signed_expr_literals_safe(right)
+        }
+        Expr::UnaryOp { operand, .. } => signed_expr_literals_safe(operand),
+        Expr::FnCall { args, .. } => args.iter().all(signed_expr_literals_safe),
+        Expr::MethodCall { object, args, .. } => {
+            signed_expr_literals_safe(object) && args.iter().all(signed_expr_literals_safe)
+        }
+        Expr::FieldAccess { object, .. } => signed_expr_literals_safe(object),
+        Expr::Index { object, index } => {
+            signed_expr_literals_safe(object) && signed_expr_literals_safe(index)
+        }
+        Expr::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            signed_expr_literals_safe(condition)
+                && block_signed_literals_safe(then_block)
+                && else_block
+                    .as_ref()
+                    .is_none_or(|block| block_signed_literals_safe(block))
+        }
+        Expr::Block(block) => block_signed_literals_safe(block),
+        _ => true,
+    }
+}
+
+fn block_signed_literals_safe(block: &Block) -> bool {
+    block.stmts.iter().all(|stmt| match stmt {
+        Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::Ghost { value, .. } => {
+            signed_expr_literals_safe(value)
+        }
+        Stmt::Return(Some(expr))
+        | Stmt::Assert {
+            condition: expr, ..
+        } => signed_expr_literals_safe(expr),
+        Stmt::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            signed_expr_literals_safe(condition)
+                && block_signed_literals_safe(then_block)
+                && else_block
+                    .as_ref()
+                    .is_none_or(|block| block_signed_literals_safe(block))
+        }
+        Stmt::While {
+            condition, body, ..
+        } => signed_expr_literals_safe(condition) && block_signed_literals_safe(body),
+        Stmt::Emit { args, .. } => args.iter().all(signed_expr_literals_safe),
+        Stmt::Expr(expr) => signed_expr_literals_safe(expr),
+        _ => true,
+    })
+}
+
+fn signed_inv_literals_safe(term: &InvTerm) -> bool {
+    match term {
+        InvTerm::BigLiteral(n) => decimal_lte(n, I128_MIN_ABS_DEC),
+        InvTerm::BinOp { left, right, .. } => {
+            signed_inv_literals_safe(left) && signed_inv_literals_safe(right)
+        }
+        InvTerm::FnCall { args, .. } => args.iter().all(signed_inv_literals_safe),
+        _ => true,
+    }
+}
+
+fn compare_expr_bv<'ctx>(
+    left: &BV<'ctx>,
+    op: &BinOp,
+    right: &BV<'ctx>,
+    signed: bool,
+) -> Bool<'ctx> {
+    match op {
+        BinOp::Eq => left._eq(right),
+        BinOp::Neq => left._eq(right).not(),
+        BinOp::Lt if signed => left.bvslt(right),
+        BinOp::Gt if signed => left.bvsgt(right),
+        BinOp::Lte if signed => left.bvsle(right),
+        BinOp::Gte if signed => left.bvsge(right),
+        BinOp::Lt => left.bvult(right),
+        BinOp::Gt => left.bvugt(right),
+        BinOp::Lte => left.bvule(right),
+        BinOp::Gte => left.bvuge(right),
+        _ => unreachable!("non-comparison operator passed to compare_expr_bv"),
+    }
+}
+
+fn compare_inv_bv<'ctx>(left: &BV<'ctx>, op: &CmpOp, right: &BV<'ctx>, signed: bool) -> Bool<'ctx> {
+    match op {
+        CmpOp::Eq => left._eq(right),
+        CmpOp::Neq => left._eq(right).not(),
+        CmpOp::Lt if signed => left.bvslt(right),
+        CmpOp::Gt if signed => left.bvsgt(right),
+        CmpOp::Lte if signed => left.bvsle(right),
+        CmpOp::Gte if signed => left.bvsge(right),
+        CmpOp::Lt => left.bvult(right),
+        CmpOp::Gt => left.bvugt(right),
+        CmpOp::Lte => left.bvule(right),
+        CmpOp::Gte => left.bvuge(right),
+    }
+}
+
+fn expr_comparison_is_signed(left: &Expr, right: &Expr, signed_vars: &HashSet<String>) -> bool {
+    expr_uses_signed_var(left, signed_vars) || expr_uses_signed_var(right, signed_vars)
+}
+
+fn expr_uses_signed_var(expr: &Expr, signed_vars: &HashSet<String>) -> bool {
+    match expr {
+        Expr::Ident(name) => signed_vars.contains(name),
+        Expr::BinOp { left, right, .. } => {
+            expr_uses_signed_var(left, signed_vars) || expr_uses_signed_var(right, signed_vars)
+        }
+        Expr::UnaryOp { operand, .. } => expr_uses_signed_var(operand, signed_vars),
+        Expr::FnCall { args, .. } => args
+            .iter()
+            .any(|arg| expr_uses_signed_var(arg, signed_vars)),
+        Expr::MethodCall { object, args, .. } => {
+            expr_uses_signed_var(object, signed_vars)
+                || args
+                    .iter()
+                    .any(|arg| expr_uses_signed_var(arg, signed_vars))
+        }
+        Expr::FieldAccess { object, field } => {
+            if let Expr::Ident(object_name) = object.as_ref() {
+                signed_vars.contains(&format!("{}_{}", object_name, field))
+            } else {
+                expr_uses_signed_var(object, signed_vars)
+            }
+        }
+        Expr::Index { object, index } => {
+            expr_uses_signed_var(object, signed_vars) || expr_uses_signed_var(index, signed_vars)
+        }
+        Expr::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            expr_uses_signed_var(condition, signed_vars)
+                || block_uses_signed_var(then_block, signed_vars)
+                || else_block
+                    .as_ref()
+                    .is_some_and(|block| block_uses_signed_var(block, signed_vars))
+        }
+        Expr::Block(block) => block_uses_signed_var(block, signed_vars),
+        _ => false,
+    }
+}
+
+fn expr_contains_fncall(expr: &Expr) -> bool {
+    match expr {
+        Expr::FnCall { .. } => true,
+        Expr::BinOp { left, right, .. } => {
+            expr_contains_fncall(left) || expr_contains_fncall(right)
+        }
+        Expr::UnaryOp { operand, .. } => expr_contains_fncall(operand),
+        Expr::MethodCall { object, args, .. } => {
+            expr_contains_fncall(object) || args.iter().any(expr_contains_fncall)
+        }
+        Expr::FieldAccess { object, .. } => expr_contains_fncall(object),
+        Expr::Index { object, index } => {
+            expr_contains_fncall(object) || expr_contains_fncall(index)
+        }
+        Expr::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            expr_contains_fncall(condition)
+                || block_contains_fncall(then_block)
+                || else_block
+                    .as_ref()
+                    .is_some_and(|block| block_contains_fncall(block))
+        }
+        Expr::Block(block) => block_contains_fncall(block),
+        _ => false,
+    }
+}
+
+fn block_contains_fncall(block: &Block) -> bool {
+    block.stmts.iter().any(|stmt| match stmt {
+        Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::Ghost { value, .. } => {
+            expr_contains_fncall(value)
+        }
+        Stmt::Return(Some(expr))
+        | Stmt::Assert {
+            condition: expr, ..
+        } => expr_contains_fncall(expr),
+        Stmt::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            expr_contains_fncall(condition)
+                || block_contains_fncall(then_block)
+                || else_block
+                    .as_ref()
+                    .is_some_and(|block| block_contains_fncall(block))
+        }
+        Stmt::While {
+            condition, body, ..
+        } => expr_contains_fncall(condition) || block_contains_fncall(body),
+        Stmt::Emit { args, .. } => args.iter().any(expr_contains_fncall),
+        Stmt::Expr(expr) => expr_contains_fncall(expr),
+        _ => false,
+    })
+}
+
+fn block_uses_signed_var(block: &Block, signed_vars: &HashSet<String>) -> bool {
+    block.stmts.iter().any(|stmt| match stmt {
+        Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::Ghost { value, .. } => {
+            expr_uses_signed_var(value, signed_vars)
+        }
+        Stmt::Return(Some(expr))
+        | Stmt::Assert {
+            condition: expr, ..
+        } => expr_uses_signed_var(expr, signed_vars),
+        Stmt::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            expr_uses_signed_var(condition, signed_vars)
+                || block_uses_signed_var(then_block, signed_vars)
+                || else_block
+                    .as_ref()
+                    .is_some_and(|block| block_uses_signed_var(block, signed_vars))
+        }
+        Stmt::While {
+            condition, body, ..
+        } => {
+            expr_uses_signed_var(condition, signed_vars) || block_uses_signed_var(body, signed_vars)
+        }
+        Stmt::Emit { args, .. } => args
+            .iter()
+            .any(|arg| expr_uses_signed_var(arg, signed_vars)),
+        _ => false,
+    })
+}
+
+fn inv_comparison_is_signed(
+    left: &InvTerm,
+    right: &InvTerm,
+    signed_vars: &HashSet<String>,
+) -> bool {
+    inv_term_uses_signed_var(left, signed_vars) || inv_term_uses_signed_var(right, signed_vars)
+}
+
+fn inv_term_uses_signed_var(term: &InvTerm, signed_vars: &HashSet<String>) -> bool {
+    match term {
+        InvTerm::Var { name, .. } => signed_vars.contains(name),
+        InvTerm::FieldAccess { object, field, .. } => {
+            signed_vars.contains(&format!("{}_{}", object, field))
+        }
+        InvTerm::BinOp { left, right, .. } => {
+            inv_term_uses_signed_var(left, signed_vars)
+                || inv_term_uses_signed_var(right, signed_vars)
+        }
+        InvTerm::FnCall { args, .. } => args
+            .iter()
+            .any(|arg| inv_term_uses_signed_var(arg, signed_vars)),
+        InvTerm::Literal(_) | InvTerm::BigLiteral(_) => false,
+    }
+}
+
 fn invariant_to_z3<'ctx>(
-    ctx: &'ctx Context, inv: &InvariantExpr,
-    pre_vars: &HashMap<String, BV<'ctx>>, post_vars: &HashMap<String, BV<'ctx>>,
+    ctx: &'ctx Context,
+    inv: &InvariantExpr,
+    pre_vars: &HashMap<String, BV<'ctx>>,
+    post_vars: &HashMap<String, BV<'ctx>>,
+    signed_vars: &HashSet<String>,
 ) -> Option<Bool<'ctx>> {
     match inv {
         InvariantExpr::Comparison { left, op, right } => {
-            let l = inv_term_to_z3(ctx, left, pre_vars, post_vars)?;
-            let r = inv_term_to_z3(ctx, right, pre_vars, post_vars)?;
-            Some(match op {
-                CmpOp::Eq => l._eq(&r), CmpOp::Neq => l._eq(&r).not(),
-                CmpOp::Lt => l.bvult(&r), CmpOp::Gt => l.bvugt(&r),
-                CmpOp::Lte => l.bvule(&r), CmpOp::Gte => l.bvuge(&r),
-            })
-        },
+            let signed = inv_comparison_is_signed(left, right, signed_vars);
+            if signed && (!signed_inv_literals_safe(left) || !signed_inv_literals_safe(right)) {
+                return None;
+            }
+            let l = inv_term_to_z3(ctx, left, pre_vars, post_vars, signed_vars)?;
+            let r = inv_term_to_z3(ctx, right, pre_vars, post_vars, signed_vars)?;
+            Some(compare_inv_bv(&l, op, &r, signed))
+        }
         InvariantExpr::And(a, b) => {
-            let (za, zb) = (invariant_to_z3(ctx, a, pre_vars, post_vars)?,
-                            invariant_to_z3(ctx, b, pre_vars, post_vars)?);
+            let (za, zb) = (
+                invariant_to_z3(ctx, a, pre_vars, post_vars, signed_vars)?,
+                invariant_to_z3(ctx, b, pre_vars, post_vars, signed_vars)?,
+            );
             Some(Bool::and(ctx, &[&za, &zb]))
-        },
+        }
         InvariantExpr::Or(a, b) => {
-            let (za, zb) = (invariant_to_z3(ctx, a, pre_vars, post_vars)?,
-                            invariant_to_z3(ctx, b, pre_vars, post_vars)?);
+            let (za, zb) = (
+                invariant_to_z3(ctx, a, pre_vars, post_vars, signed_vars)?,
+                invariant_to_z3(ctx, b, pre_vars, post_vars, signed_vars)?,
+            );
             Some(Bool::or(ctx, &[&za, &zb]))
-        },
-        InvariantExpr::Not(a) => Some(invariant_to_z3(ctx, a, pre_vars, post_vars)?.not()),
+        }
+        InvariantExpr::Not(a) => {
+            Some(invariant_to_z3(ctx, a, pre_vars, post_vars, signed_vars)?.not())
+        }
         InvariantExpr::True => Some(Bool::from_bool(ctx, true)),
         InvariantExpr::Forall { var, domain, body } => {
             // Quantified assertion: ∀ var ∈ [0, domain) : body
             // Create a bounded integer variable for the quantifier
-            let bound_var = BV::new_const(ctx, var.as_str(), 64);
-            let zero = BV::from_i64(ctx, 0, 64);
-            let domain_z3 = inv_term_to_z3(ctx, domain, pre_vars, post_vars)?;
+            let bound_var = BV::new_const(ctx, var.as_str(), SOLVER_BV_WIDTH);
+            let zero = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH);
+            let domain_z3 = inv_term_to_z3(ctx, domain, pre_vars, post_vars, signed_vars)?;
 
             // Construct: ∀ bound_var: (0 <= bound_var < domain) => body
             // We encode this as: NOT EXISTS bound_var: (0 <= bound_var < domain) AND NOT body
@@ -831,70 +2024,74 @@ fn invariant_to_z3<'ctx>(
             let mut augmented_post = post_vars.clone();
             augmented_post.insert(var.clone(), bound_var.clone());
 
-            let body_z3 = invariant_to_z3(ctx, body, &augmented_pre, &augmented_post)?;
-            let range = Bool::and(ctx, &[&bound_var.bvuge(&zero), &bound_var.bvult(&domain_z3)]);
+            let body_z3 = invariant_to_z3(ctx, body, &augmented_pre, &augmented_post, signed_vars)?;
+            let range = Bool::and(
+                ctx,
+                &[&bound_var.bvuge(&zero), &bound_var.bvult(&domain_z3)],
+            );
             let implication = range.implies(&body_z3);
 
             // Use Z3's native forall
             let pattern = z3::Pattern::new(ctx, &[&bound_var as &dyn Ast]);
-            let quantified = z3::ast::forall_const(
-                ctx,
-                &[&bound_var],
-                &[&pattern],
-                &implication,
-            );
+            let quantified = z3::ast::forall_const(ctx, &[&bound_var], &[&pattern], &implication);
             Some(quantified)
-        },
+        }
         InvariantExpr::Exists { var, domain, body } => {
             // Existential: ∃ var ∈ [0, domain) : body
-            let bound_var = BV::new_const(ctx, var.as_str(), 64);
-            let zero = BV::from_i64(ctx, 0, 64);
-            let domain_z3 = inv_term_to_z3(ctx, domain, pre_vars, post_vars)?;
+            let bound_var = BV::new_const(ctx, var.as_str(), SOLVER_BV_WIDTH);
+            let zero = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH);
+            let domain_z3 = inv_term_to_z3(ctx, domain, pre_vars, post_vars, signed_vars)?;
 
             let mut augmented_pre = pre_vars.clone();
             augmented_pre.insert(var.clone(), bound_var.clone());
             let mut augmented_post = post_vars.clone();
             augmented_post.insert(var.clone(), bound_var.clone());
 
-            let body_z3 = invariant_to_z3(ctx, body, &augmented_pre, &augmented_post)?;
-            let range = Bool::and(ctx, &[&bound_var.bvuge(&zero), &bound_var.bvult(&domain_z3)]);
+            let body_z3 = invariant_to_z3(ctx, body, &augmented_pre, &augmented_post, signed_vars)?;
+            let range = Bool::and(
+                ctx,
+                &[&bound_var.bvuge(&zero), &bound_var.bvult(&domain_z3)],
+            );
             let conjunction = Bool::and(ctx, &[&range, &body_z3]);
 
             let pattern = z3::Pattern::new(ctx, &[&bound_var as &dyn Ast]);
-            let quantified = z3::ast::exists_const(
-                ctx,
-                &[&bound_var],
-                &[&pattern],
-                &conjunction,
-            );
+            let quantified = z3::ast::exists_const(ctx, &[&bound_var], &[&pattern], &conjunction);
             Some(quantified)
-        },
+        }
     }
 }
 
 fn inv_term_to_z3<'ctx>(
-    ctx: &'ctx Context, term: &InvTerm,
-    pre_vars: &HashMap<String, BV<'ctx>>, post_vars: &HashMap<String, BV<'ctx>>,
+    ctx: &'ctx Context,
+    term: &InvTerm,
+    pre_vars: &HashMap<String, BV<'ctx>>,
+    post_vars: &HashMap<String, BV<'ctx>>,
+    signed_vars: &HashSet<String>,
 ) -> Option<BV<'ctx>> {
     match term {
-        InvTerm::Literal(n) => Some(BV::from_i64(ctx, *n as i64, 64)),
+        InvTerm::Literal(n) => bv_from_i128(ctx, *n),
+        InvTerm::BigLiteral(n) => bv_from_decimal(ctx, n),
         InvTerm::Var { name, is_post } => {
             if *is_post {
                 post_vars.get(name).cloned()
-                    .or_else(|| Some(BV::new_const(ctx, format!("{}_post", name).as_str(), 64)))
             } else {
                 pre_vars.get(name).cloned()
-                    .or_else(|| Some(BV::new_const(ctx, name.as_str(), 64)))
             }
-        },
+        }
         InvTerm::BinOp { left, op, right } => {
-            let l = inv_term_to_z3(ctx, left, pre_vars, post_vars)?;
-            let r = inv_term_to_z3(ctx, right, pre_vars, post_vars)?;
+            let signed = inv_comparison_is_signed(left, right, signed_vars);
+            if signed && (!signed_inv_literals_safe(left) || !signed_inv_literals_safe(right)) {
+                return None;
+            }
+            let l = inv_term_to_z3(ctx, left, pre_vars, post_vars, signed_vars)?;
+            let r = inv_term_to_z3(ctx, right, pre_vars, post_vars, signed_vars)?;
             Some(match op {
                 ArithOp::Add => l.bvadd(&r),
                 ArithOp::Sub => l.bvsub(&r),
                 ArithOp::Mul => l.bvmul(&r),
+                ArithOp::Div if signed => l.bvsdiv(&r),
                 ArithOp::Div => l.bvudiv(&r),
+                ArithOp::Mod if signed => l.bvsrem(&r),
                 ArithOp::Mod => l.bvurem(&r),
                 ArithOp::BitAnd => l.bvand(&r),
                 ArithOp::BitOr => l.bvor(&r),
@@ -902,29 +2099,26 @@ fn inv_term_to_z3<'ctx>(
                 ArithOp::Shl => l.bvshl(&r),
                 ArithOp::Shr => l.bvlshr(&r),
             })
-        },
-        InvTerm::FieldAccess { object, field, is_post } => {
+        }
+        InvTerm::FieldAccess {
+            object,
+            field,
+            is_post,
+        } => {
             let n = format!("{}_{}", object, field);
             if *is_post {
                 post_vars.get(&n).cloned()
-                    .or_else(|| Some(BV::new_const(ctx, format!("{}_post", n).as_str(), 64)))
             } else {
                 pre_vars.get(&n).cloned()
-                    .or_else(|| Some(BV::new_const(ctx, n.as_str(), 64)))
             }
-        },
+        }
         InvTerm::FnCall { name, args } => {
-            // Uninterpreted function in invariant context.
-            // Encode as a Z3 uninterpreted function applied to its arguments.
-            // For now, use a fresh constant per unique call signature (sound approximation).
-            let arg_strs: Vec<String> = args.iter().enumerate().map(|(i, arg)| {
-                inv_term_to_z3(ctx, arg, pre_vars, post_vars)
-                    .map(|v| format!("{}", v))
-                    .unwrap_or_else(|| format!("arg{}", i))
-            }).collect();
-            let key = format!("__inv_fn_{}_{}", name, arg_strs.join("_"));
-            Some(BV::new_const(ctx, key.as_str(), 64))
-        },
+            let z3_args: Option<Vec<BV<'ctx>>> = args
+                .iter()
+                .map(|arg| inv_term_to_z3(ctx, arg, pre_vars, post_vars, signed_vars))
+                .collect();
+            apply_uninterpreted_bv_fn(ctx, name, &z3_args?)
+        }
     }
 }
 
@@ -932,9 +2126,18 @@ fn inv_term_to_z3<'ctx>(
 
 pub fn print_results(results: &[VerifyResult]) {
     println!();
-    println!("{}", "╔══════════════════════════════════════════════════╗".bright_blue());
-    println!("{}", "║         ANVIL VERIFICATION REPORT                ║".bright_blue());
-    println!("{}", "╚══════════════════════════════════════════════════╝".bright_blue());
+    println!(
+        "{}",
+        "╔══════════════════════════════════════════════════╗".bright_blue()
+    );
+    println!(
+        "{}",
+        "║         ANVIL VERIFICATION REPORT                ║".bright_blue()
+    );
+    println!(
+        "{}",
+        "╚══════════════════════════════════════════════════╝".bright_blue()
+    );
     println!();
 
     let mut total = 0;
@@ -944,20 +2147,23 @@ pub fn print_results(results: &[VerifyResult]) {
         total += r.postconditions_count;
         if r.verified {
             passed += r.postconditions_count;
-            println!("  {} {} — {} preconditions, {} postconditions verified ({} invariants) in {:.3}ms",
+            println!(
+                "  {} {} — {} preconditions, {} postconditions verified ({} invariants) in {:.3}ms",
                 "✓".bright_green().bold(),
                 r.fn_name.bright_white().bold(),
-                r.preconditions_count, r.postconditions_count,
+                r.preconditions_count,
+                r.postconditions_count,
                 r.invariants_checked,
                 r.duration_ms,
             );
-            println!("    {} proof: {}…{}",
-                "🔐",
+            println!(
+                "    🔐 proof: {}…{}",
                 &r.proof_hash[..16],
-                &r.proof_hash[r.proof_hash.len()-8..],
+                &r.proof_hash[r.proof_hash.len() - 8..],
             );
         } else {
-            println!("  {} {} — VERIFICATION FAILED",
+            println!(
+                "  {} {} — VERIFICATION FAILED",
                 "✗".bright_red().bold(),
                 r.fn_name.bright_white().bold(),
             );
@@ -971,13 +2177,22 @@ pub fn print_results(results: &[VerifyResult]) {
 
     println!();
     if passed == total && total > 0 {
-        println!("  {} All {}/{} postconditions proven. Zero trust required.",
-            "█".bright_green(), passed, total);
+        println!(
+            "  {} All {}/{} postconditions proven. Zero trust required.",
+            "█".bright_green(),
+            passed,
+            total
+        );
     } else if total == 0 {
         println!("  {} No postconditions to verify.", "█".bright_yellow());
     } else {
-        println!("  {} {}/{} postconditions proven. {} FAILED.",
-            "█".bright_red(), passed, total, total - passed);
+        println!(
+            "  {} {}/{} postconditions proven. {} FAILED.",
+            "█".bright_red(),
+            passed,
+            total,
+            total - passed
+        );
     }
     println!();
 }

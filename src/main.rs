@@ -2,9 +2,9 @@
 // ANVIL CLI — "Where trust doesn't compile."
 // ============================================================
 
+pub mod cli;
 pub mod core;
 pub mod engine;
-pub mod cli;
 mod lsp;
 mod singularity;
 
@@ -38,6 +38,14 @@ enum Commands {
         /// Output results as JSON (machine-readable)
         #[arg(long, default_value_t = false)]
         json: bool,
+        /// Z3 solver timeout per check, in milliseconds
+        #[arg(
+            long,
+            value_name = "MS",
+            default_value_t = engine::verifier::DEFAULT_SOLVER_TIMEOUT_MS,
+            value_parser = clap::value_parser!(u64).range(1..)
+        )]
+        timeout: u64,
     },
     /// Compile an Anvil file to Rust
     Build {
@@ -49,6 +57,14 @@ enum Commands {
         /// Target architecture (rust, llvm)
         #[arg(short, long, default_value = "rust")]
         target: String,
+        /// Z3 solver timeout per check, in milliseconds
+        #[arg(
+            long,
+            value_name = "MS",
+            default_value_t = engine::verifier::DEFAULT_SOLVER_TIMEOUT_MS,
+            value_parser = clap::value_parser!(u64).range(1..)
+        )]
+        timeout: u64,
     },
     /// Compile an Anvil file to Rust
     Compile {
@@ -57,6 +73,12 @@ enum Commands {
     },
     /// Initiate the Singularity Engine (UltraThink Mode)
     Singularity,
+    /// Diagnose local Anvil toolchain and runtime configuration
+    Doctor {
+        /// Output diagnostics as JSON
+        #[arg(long, default_value_t = false)]
+        json: bool,
+    },
     /// Parse and dump the AST as JSON
     Ast {
         /// Path to the .anv file
@@ -79,24 +101,32 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
-    // Initialize structured logging (respects RUST_LOG env var)
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
-        )
-        .with_target(false)
-        .init();
-
     let cli_args = Cli::parse();
+    let machine_readable = cli_args.command.machine_readable();
 
-    print_banner();
+    init_tracing(machine_readable);
+
+    if !machine_readable {
+        print_banner();
+    }
 
     match cli_args.command {
-        Commands::Check { file, json } => cli::cmd_check(&file, json),
-        Commands::Build { file, output, target } => cli::cmd_build(&file, &output, &target),
-        Commands::Compile { file } => info!("Iniciando pase de compilación a Rust para: {:?}", file),
+        Commands::Check {
+            file,
+            json,
+            timeout,
+        } => cli::cmd_check(&file, json, timeout),
+        Commands::Build {
+            file,
+            output,
+            target,
+            timeout,
+        } => cli::cmd_build(&file, &output, &target, timeout),
+        Commands::Compile { file } => {
+            info!("Iniciando pase de compilación a Rust para: {:?}", file)
+        }
         Commands::Singularity => singularity::initiate_engine(),
+        Commands::Doctor { json } => cli::cmd_doctor(json),
         Commands::Ast { file } => cli::cmd_ast(&file),
         Commands::Lsp => lsp::run_server().await,
         Commands::Saas { port } => engine::saas::start_server(port).await,
@@ -104,14 +134,62 @@ async fn main() {
     }
 }
 
+fn init_tracing(machine_readable: bool) {
+    if machine_readable {
+        // Machine-readable commands reserve stdout/stderr for API and CI consumers.
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::new("off"))
+            .with_writer(std::io::sink)
+            .with_target(false)
+            .init();
+    } else {
+        tracing_subscriber::fmt()
+            .with_env_filter(
+                tracing_subscriber::EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+            )
+            .with_writer(std::io::stderr)
+            .with_target(false)
+            .init();
+    }
+}
+
+impl Commands {
+    fn machine_readable(&self) -> bool {
+        matches!(
+            self,
+            Self::Check { json: true, .. } | Self::Doctor { json: true }
+        )
+    }
+}
+
 fn print_banner() {
     eprintln!();
-    eprintln!("{}", "  ╔═══════════════════════════════════════════╗".bright_blue());
-    eprintln!("{}", "  ║   ANVIL — SOVEREIGN VERIFICATION ENGINE   ║".bright_blue());
-    eprintln!("{}", "  ║   v0.6.0  [PROPRIETARY // C5-DYNAMIC]     ║".bright_blue());
-    eprintln!("{}", "  ║   Where trust doesn't compile.            ║".bright_blue());
-    eprintln!("{}", "  ╚═══════════════════════════════════════════╝".bright_blue());
-    eprintln!("  {} System status: {}", "●".bright_green(), "SOVEREIGN SHIELD ACTIVE".bold());
+    eprintln!(
+        "{}",
+        "  ╔═══════════════════════════════════════════╗".bright_blue()
+    );
+    eprintln!(
+        "{}",
+        "  ║   ANVIL — SOVEREIGN VERIFICATION ENGINE   ║".bright_blue()
+    );
+    eprintln!(
+        "{}",
+        "  ║   v0.6.0  [PROPRIETARY // C5-DYNAMIC]     ║".bright_blue()
+    );
+    eprintln!(
+        "{}",
+        "  ║   Where trust doesn't compile.            ║".bright_blue()
+    );
+    eprintln!(
+        "{}",
+        "  ╚═══════════════════════════════════════════╝".bright_blue()
+    );
+    eprintln!(
+        "  {} System status: {}",
+        "●".bright_green(),
+        "SOVEREIGN SHIELD ACTIVE".bold()
+    );
     eprintln!();
 }
 

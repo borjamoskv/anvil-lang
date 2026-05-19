@@ -20,7 +20,7 @@ contract StressTestEngine {
             pool_balance' == pool_balance - debt_to_cover
         }
     {
-        let mut liquidated = 0;
+        let mut liquidated: u64 = 0;
         
         // Malicious loop trying to bypass the global close_factor check
         // by executing sequential micro-liquidations
