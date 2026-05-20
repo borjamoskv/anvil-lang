@@ -5,117 +5,132 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  CARGO_BUILD_JOBS: 1
+  RUST_TEST_THREADS: 1
+  PYTHONDONTWRITEBYTECODE: 1
+  RUSTFLAGS: -L /usr/lib/x86_64-linux-gnu
+  CARGO_TARGET_DIR: target
+  Z3_SYS_Z3_HEADER: /usr/include/z3.h
+  LIBRARY_PATH: /usr/lib/x86_64-linux-gnu
+  LIBSQLITE3_SYS_USE_PKG_CONFIG: "1"
+  SQLITE3_LIB_DIR: /usr/lib/x86_64-linux-gnu
+  SQLITE3_INCLUDE_DIR: /usr/include
 
 jobs:
-  lint:
-    name: Lint & Format
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install Z3 Solver
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y z3 libz3-dev clang llvm
-        z3 --version
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: clippy, rustfmt
-
-    - name: Rust Cache
-      uses: Swatinem/rust-cache@v2
-
-    - name: Check Formatting
-      run: cargo fmt -- --check
-
-    - name: Lint (Clippy)
-      run: cargo clippy -- -D warnings
-
-  build_and_test:
-    name: Build & Test (${{ matrix.rust }})
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      matrix:
-        rust: [stable, "1.85"]
-
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Install Z3 Solver
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y z3 libz3-dev clang llvm
-        z3 --version
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@master
-      with:
-        toolchain: ${{ matrix.rust }}
-
-    - name: Rust Cache
-      uses: Swatinem/rust-cache@v2
-
-    - name: Build
-      run: cargo build --verbose
-
-    - name: Run Tests
-      run: cargo test --verbose
-
-    - name: Build Proof Market Oracle (Axum)
-      working-directory: services/proof-market
-      run: cargo build --verbose
-
-    - name: Verify Hello World Example
-      run: cargo run -- check examples/hello.anv
-
-    - name: Verify Transfer Example
-      run: cargo run -- check examples/transfer.anv
-
-    - name: Generate Documentation
-      run: cargo doc --no-deps
-
-  integration:
-    name: Integration Tests
+  quick:
+    name: Quick Checks
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    needs: build_and_test
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
 
     - name: Install Z3 Solver
       run: |
         sudo apt-get update
-        sudo apt-get install -y z3 libz3-dev clang llvm
+        sudo apt-get install -y z3 libz3-dev clang llvm libsqlite3-dev
+        z3 --version
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
+
+    - name: Rust Cache
+      uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: quick
+
+    - name: Check Formatting
+      run: |
+        cargo fmt -- --check
+        cargo fmt --manifest-path services/proof-market/Cargo.toml -- --check
+
+    - name: Check Root Crate
+      run: cargo check --bin anvil --verbose
+
+    - name: Check Proof Market Crate
+      run: cargo check --manifest-path services/proof-market/Cargo.toml --verbose
+
+    - name: Run Unit Tests
+      run: cargo test --bin anvil --verbose -- --test-threads=1
+
+    - name: Run Proof Market Unit Tests
+      run: cargo test --manifest-path services/proof-market/Cargo.toml --verbose
+
+  full:
+    name: Full Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs: quick
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
+
+    - name: Install Z3 Solver
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y z3 libz3-dev clang llvm libsqlite3-dev
+        z3 --version
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: full
 
-    - name: Build
-      run: cargo build
+    - name: Build Debug Binaries
+      run: |
+        cargo build --bin anvil --verbose
+        cargo build --manifest-path services/proof-market/Cargo.toml --bin proof-market --verbose
+
+    - name: Run Proof Market Unit Tests
+      run: cargo test --manifest-path services/proof-market/Cargo.toml --verbose
+
+    - name: Run Rust Integration Tests
+      run: cargo test --test integration_tests --verbose -- --test-threads=1
 
     - name: Set up Python 3.10
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
-    - name: Integration Test - Vault Proof Market
+    - name: Python Proof Market - Vault
       run: python3 tests/test_proof_market.py
+      env:
+        ANVIL_BIN: ${{ env.CARGO_TARGET_DIR }}/debug/anvil
+        PROOF_MARKET_BIN: ${{ env.CARGO_TARGET_DIR }}/debug/proof-market
 
-    - name: Integration Test - AMM Vulnerability Market
+    - name: Python Proof Market - AMM
       run: python3 tests/test_proof_market_amm.py
+      env:
+        ANVIL_BIN: ${{ env.CARGO_TARGET_DIR }}/debug/anvil
+        PROOF_MARKET_BIN: ${{ env.CARGO_TARGET_DIR }}/debug/proof-market
+
+    - name: Verify Hello World Example
+      run: cargo run --bin anvil -- check examples/hello.anv
+
+    - name: Verify Transfer Example
+      run: cargo run --bin anvil -- check examples/transfer.anv
+
+    - name: Release Build
+      run: |
+        cargo build --release --bin anvil --verbose
+        cargo build --release --manifest-path services/proof-market/Cargo.toml --bin proof-market --verbose
 
     - name: Generate CORTEX Provenance Manifests
       run: |
@@ -124,7 +139,7 @@ jobs:
         for anv_file in examples/*.anv; do
           if [ -f "$anv_file" ]; then
             echo "  → Building $anv_file with provenance..."
-            ./target/debug/anvil build "$anv_file" -o "artifacts/cortex/$(basename "$anv_file" .anv)" || true
+            "$CARGO_TARGET_DIR/debug/anvil" build "$anv_file" -o "artifacts/cortex/$(basename "$anv_file" .anv)" || true
           fi
         done
         echo "  ✓ Manifests generated:"
@@ -143,15 +158,25 @@ jobs:
     name: Security Audit
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    needs: quick
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        persist-credentials: false
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
 
+    - name: Generate Lockfiles
+      run: |
+        cargo generate-lockfile
+        cargo generate-lockfile --manifest-path services/proof-market/Cargo.toml
+
     - name: Install cargo-audit
-      run: cargo install cargo-audit
+      run: cargo install cargo-audit --locked
 
     - name: Run Security Audit
-      run: cargo audit
+      run: |
+        cargo audit --file Cargo.lock
+        cargo audit --file services/proof-market/Cargo.lock

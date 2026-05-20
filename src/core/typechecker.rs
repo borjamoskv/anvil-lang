@@ -17,6 +17,7 @@ use tracing::debug;
 #[derive(Debug, Clone)]
 pub struct TypeEnv {
     bindings: HashMap<String, Type>,
+    scopes: Vec<HashMap<String, Type>>,
     /// Constraints discovered during checking (e.g., "x must be >= 0 for u64")
     pub constraints: Vec<TypeConstraint>,
     /// Errors accumulated during checking
@@ -57,6 +58,7 @@ impl TypeEnv {
     pub fn new() -> Self {
         Self {
             bindings: HashMap::new(),
+            scopes: Vec::new(),
             constraints: Vec::new(),
             errors: Vec::new(),
             warnings: Vec::new(),
@@ -64,11 +66,28 @@ impl TypeEnv {
     }
 
     pub fn bind(&mut self, name: String, ty: Type) {
-        self.bindings.insert(name, ty);
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name, ty);
+        } else {
+            self.bindings.insert(name, ty);
+        }
     }
 
     pub fn lookup(&self, name: &str) -> Option<&Type> {
+        for scope in self.scopes.iter().rev() {
+            if let Some(ty) = scope.get(name) {
+                return Some(ty);
+            }
+        }
         self.bindings.get(name)
+    }
+
+    fn push_scope(&mut self) {
+        self.scopes.push(HashMap::new());
+    }
+
+    fn pop_scope(&mut self) {
+        self.scopes.pop();
     }
 
     /// Register type constraints for Z3 based on the declared type
@@ -196,6 +215,12 @@ impl TypeEnv {
     }
 }
 
+impl Default for TypeEnv {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Check an entire program for type consistency
 pub fn check_program(program: &Program) -> TypeEnv {
     let mut env = TypeEnv::new();
@@ -208,9 +233,17 @@ pub fn check_program(program: &Program) -> TypeEnv {
             Item::Const(c) => check_const(c, &mut env),
             Item::GhostVar(g) => {
                 // Ghost variables: bind in proof domain
+                check_declared_expr(
+                    &g.name,
+                    &g.ty,
+                    &g.value,
+                    &g.name,
+                    "Ghost variable",
+                    &mut env,
+                );
                 env.bind(g.name.clone(), g.ty.clone());
                 env.register_constraints(&g.name, &g.ty);
-            },
+            }
         }
     }
 
@@ -226,6 +259,8 @@ pub fn check_program(program: &Program) -> TypeEnv {
 }
 
 fn check_function(func: &FnDef, env: &mut TypeEnv) {
+    env.push_scope();
+
     // Bind params and register constraints
     for param in &func.params {
         env.bind(param.name.clone(), param.ty.clone());
@@ -233,33 +268,29 @@ fn check_function(func: &FnDef, env: &mut TypeEnv) {
     }
 
     // Check body statements
-    check_block(&func.body, env, &func.name);
-
-    // Verify return type matches body
-    if let (Some(ret_ty), Some(Stmt::Return(Some(expr)))) = (&func.return_type, func.body.stmts.last()) {
-        let expr_ty = infer_expr_type(expr, env);
-        if let Some(ety) = &expr_ty {
-            if !types_compatible(ety, ret_ty) {
-                env.errors.push(TypeError {
-                    message: format!(
-                        "Return type mismatch in '{}': expected {}, got {}",
-                        func.name,
-                        format_type(ret_ty),
-                        format_type(ety)
-                    ),
-                    location: func.name.clone(),
-                });
-            }
-        }
-    }
+    check_block(&func.body, env, &func.name, func.return_type.as_ref());
 
     // Check for potential overflow in assignments
     check_overflow_safety(func, env);
+
+    env.pop_scope();
 }
 
 fn check_contract(contract: &ContractDef, env: &mut TypeEnv) {
+    env.push_scope();
+
     // Bind state variables
     for sv in &contract.state_vars {
+        if let Some(default) = &sv.default {
+            check_declared_expr(
+                &sv.name,
+                &sv.ty,
+                default,
+                &contract.name,
+                "State variable",
+                env,
+            );
+        }
         env.bind(sv.name.clone(), sv.ty.clone());
         env.register_constraints(&sv.name, &sv.ty);
     }
@@ -268,101 +299,419 @@ fn check_contract(contract: &ContractDef, env: &mut TypeEnv) {
     for func in &contract.functions {
         check_function(func, env);
     }
+
+    env.pop_scope();
 }
 
 fn check_const(c: &ConstDef, env: &mut TypeEnv) {
+    check_declared_expr(&c.name, &c.ty, &c.value, &c.name, "Const", env);
     env.bind(c.name.clone(), c.ty.clone());
-    let expr_ty = infer_expr_type(&c.value, env);
-    if let Some(ety) = &expr_ty {
-        if !types_compatible(ety, &c.ty) {
-            env.errors.push(TypeError {
-                message: format!(
-                    "Const '{}' declared as {} but initialized with {}",
-                    c.name,
-                    format_type(&c.ty),
-                    format_type(ety)
-                ),
-                location: c.name.clone(),
-            });
-        }
-    }
 }
 
-fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str) {
+fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str, expected_return: Option<&Type>) {
+    env.push_scope();
+
     for stmt in &block.stmts {
         match stmt {
-            Stmt::Let { name, ty, value, .. } => {
-                let val_ty = infer_expr_type(value, env);
+            Stmt::Let {
+                name, ty, value, ..
+            } => {
+                if let Some(undefined) = undefined_ident(value, env) {
+                    env.errors.push(TypeError {
+                        message: format!("Use of undefined variable '{}'", undefined),
+                        location: fn_name.to_string(),
+                    });
+                }
                 if let Some(declared) = ty {
-                    if let Some(ref inferred) = val_ty {
-                        if !types_compatible(inferred, declared) {
-                            env.errors.push(TypeError {
-                                message: format!(
-                                    "Type mismatch in 'let {}': declared {}, got {}",
-                                    name,
-                                    format_type(declared),
-                                    format_type(inferred)
-                                ),
-                                location: fn_name.to_string(),
-                            });
-                        }
-                    }
+                    check_declared_expr(name, declared, value, fn_name, "let", env);
                     env.bind(name.clone(), declared.clone());
                     env.register_constraints(name, declared);
-                } else if let Some(ref inferred) = val_ty {
+                } else if let Some(ref inferred) = infer_expr_type(value, env) {
                     env.bind(name.clone(), inferred.clone());
                     env.register_constraints(name, inferred);
                 }
             }
             Stmt::Assign { target, value, .. } => {
+                if let Some(undefined) = undefined_ident(value, env) {
+                    env.errors.push(TypeError {
+                        message: format!("Use of undefined variable '{}'", undefined),
+                        location: fn_name.to_string(),
+                    });
+                }
                 let target_name = match target {
                     LValue::Ident(n) => Some(n.as_str()),
                     _ => None,
                 };
                 if let Some(name) = target_name {
                     let target_ty = env.lookup(name).cloned();
-                    let val_ty = infer_expr_type(value, env);
-                    if let (Some(tt), Some(vt)) = (&target_ty, &val_ty) {
-                        if !types_compatible(vt, tt) {
-                            env.errors.push(TypeError {
-                                message: format!(
-                                    "Assignment type mismatch for '{}': expected {}, got {}",
-                                    name,
-                                    format_type(tt),
-                                    format_type(vt)
-                                ),
-                                location: fn_name.to_string(),
-                            });
+                    match &target_ty {
+                        None => env.errors.push(TypeError {
+                            message: format!("Assignment to undefined variable '{}'", name),
+                            location: fn_name.to_string(),
+                        }),
+                        Some(tt) => {
+                            check_declared_expr(name, tt, value, fn_name, "Assignment", env);
                         }
                     }
                 }
             }
             Stmt::Return(Some(expr)) => {
-                let _ = infer_expr_type(expr, env);
-            }
-            Stmt::Ghost { name, ty, value, .. } => {
-                // Ghost variables: bind in proof domain only
-                let val_ty = infer_expr_type(value, env);
-                if let Some(ref inferred) = val_ty {
-                    if !types_compatible(inferred, ty) {
-                        env.warnings.push(TypeWarning {
-                            message: format!(
-                                "Ghost variable '{}' type mismatch: declared {}, inferred {}",
-                                name, format_type(ty), format_type(inferred)
-                            ),
-                            location: fn_name.to_string(),
-                        });
-                    }
+                if let Some(undefined) = undefined_ident(expr, env) {
+                    env.errors.push(TypeError {
+                        message: format!("Use of undefined variable '{}'", undefined),
+                        location: fn_name.to_string(),
+                    });
                 }
+                if let Some(expected) = expected_return {
+                    check_declared_expr(fn_name, expected, expr, fn_name, "Return", env);
+                }
+            }
+            Stmt::Ghost {
+                name, ty, value, ..
+            } => {
+                // Ghost variables: bind in proof domain only
+                if let Some(undefined) = undefined_ident(value, env) {
+                    env.errors.push(TypeError {
+                        message: format!("Use of undefined variable '{}'", undefined),
+                        location: fn_name.to_string(),
+                    });
+                }
+                check_declared_expr(name, ty, value, fn_name, "Ghost variable", env);
                 env.bind(name.clone(), ty.clone());
                 env.register_constraints(name, ty);
             }
             Stmt::Emit { .. } => {
                 // Emit statements are passthrough for type checking
             }
+            Stmt::Assert { condition, .. } => {
+                check_bool_expr(condition, env, fn_name, "assert condition");
+            }
+            Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
+                check_bool_expr(condition, env, fn_name, "if condition");
+                check_block(then_block, env, fn_name, expected_return);
+                if let Some(else_block) = else_block {
+                    check_block(else_block, env, fn_name, expected_return);
+                }
+            }
+            Stmt::While {
+                condition, body, ..
+            } => {
+                check_bool_expr(condition, env, fn_name, "while condition");
+                check_block(body, env, fn_name, expected_return);
+            }
             _ => {}
         }
     }
+
+    env.pop_scope();
+}
+
+fn check_bool_expr(expr: &Expr, env: &mut TypeEnv, fn_name: &str, label: &str) {
+    if let Some(undefined) = undefined_ident(expr, env) {
+        env.errors.push(TypeError {
+            message: format!("Use of undefined variable '{}'", undefined),
+            location: fn_name.to_string(),
+        });
+        return;
+    }
+    if let Some(ty) = infer_expr_type(expr, env) {
+        if !types_compatible(&ty, &Type::Bool) {
+            env.errors.push(TypeError {
+                message: format!("{} must be bool, got {}", label, format_type(&ty)),
+                location: fn_name.to_string(),
+            });
+        }
+    }
+}
+
+fn check_declared_expr(
+    name: &str,
+    expected: &Type,
+    expr: &Expr,
+    location: &str,
+    label: &str,
+    env: &mut TypeEnv,
+) {
+    if expr_fits_type(expr, expected) {
+        return;
+    }
+
+    if let Some(actual) = infer_expr_type(expr, env) {
+        if types_compatible(&actual, expected) {
+            return;
+        }
+        env.errors.push(TypeError {
+            message: format!(
+                "{} '{}' declared as {} but initialized with {}",
+                label,
+                name,
+                format_type(expected),
+                format_type(&actual)
+            ),
+            location: location.to_string(),
+        });
+    } else {
+        if expr_contains_fncall(expr) {
+            return;
+        }
+        env.errors.push(TypeError {
+            message: format!(
+                "{} '{}' declared as {} but initialized with incompatible expression",
+                label,
+                name,
+                format_type(expected)
+            ),
+            location: location.to_string(),
+        });
+    }
+}
+
+fn expr_contains_fncall(expr: &Expr) -> bool {
+    match expr {
+        Expr::FnCall { .. } => true,
+        Expr::BinOp { left, right, .. } => {
+            expr_contains_fncall(left) || expr_contains_fncall(right)
+        }
+        Expr::UnaryOp { operand, .. } => expr_contains_fncall(operand),
+        Expr::MethodCall { object, args, .. } => {
+            expr_contains_fncall(object) || args.iter().any(expr_contains_fncall)
+        }
+        Expr::FieldAccess { object, .. } => expr_contains_fncall(object),
+        Expr::Index { object, index } => {
+            expr_contains_fncall(object) || expr_contains_fncall(index)
+        }
+        Expr::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            expr_contains_fncall(condition)
+                || block_contains_fncall(then_block)
+                || else_block.as_ref().is_some_and(block_contains_fncall)
+        }
+        Expr::Block(block) => block_contains_fncall(block),
+        _ => false,
+    }
+}
+
+fn block_contains_fncall(block: &Block) -> bool {
+    block.stmts.iter().any(|stmt| match stmt {
+        Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::Ghost { value, .. } => {
+            expr_contains_fncall(value)
+        }
+        Stmt::Return(Some(expr))
+        | Stmt::Assert {
+            condition: expr, ..
+        } => expr_contains_fncall(expr),
+        Stmt::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
+            expr_contains_fncall(condition)
+                || block_contains_fncall(then_block)
+                || else_block.as_ref().is_some_and(block_contains_fncall)
+        }
+        Stmt::While {
+            condition, body, ..
+        } => expr_contains_fncall(condition) || block_contains_fncall(body),
+        Stmt::Emit { args, .. } => args.iter().any(expr_contains_fncall),
+        Stmt::Expr(expr) => expr_contains_fncall(expr),
+        _ => false,
+    })
+}
+
+fn undefined_ident(expr: &Expr, env: &TypeEnv) -> Option<String> {
+    match expr {
+        Expr::Ident(name) => env.lookup(name).is_none().then(|| name.clone()),
+        Expr::BinOp { left, right, .. } => {
+            undefined_ident(left, env).or_else(|| undefined_ident(right, env))
+        }
+        Expr::UnaryOp { operand, .. } => undefined_ident(operand, env),
+        Expr::FnCall { args, .. } => args.iter().find_map(|arg| undefined_ident(arg, env)),
+        Expr::MethodCall { object, args, .. } => undefined_ident(object, env)
+            .or_else(|| args.iter().find_map(|arg| undefined_ident(arg, env))),
+        Expr::FieldAccess { object, .. } => undefined_ident(object, env),
+        Expr::Index { object, index } => {
+            undefined_ident(object, env).or_else(|| undefined_ident(index, env))
+        }
+        Expr::If {
+            condition,
+            then_block,
+            else_block,
+        } => undefined_ident(condition, env)
+            .or_else(|| undefined_ident_in_block(then_block, env))
+            .or_else(|| {
+                else_block
+                    .as_ref()
+                    .and_then(|block| undefined_ident_in_block(block, env))
+            }),
+        Expr::Block(block) => undefined_ident_in_block(block, env),
+        _ => None,
+    }
+}
+
+fn undefined_ident_in_block(block: &Block, env: &TypeEnv) -> Option<String> {
+    block.stmts.iter().find_map(|stmt| match stmt {
+        Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::Ghost { value, .. } => {
+            undefined_ident(value, env)
+        }
+        Stmt::Return(Some(expr))
+        | Stmt::Assert {
+            condition: expr, ..
+        } => undefined_ident(expr, env),
+        Stmt::If {
+            condition,
+            then_block,
+            else_block,
+        } => undefined_ident(condition, env)
+            .or_else(|| undefined_ident_in_block(then_block, env))
+            .or_else(|| {
+                else_block
+                    .as_ref()
+                    .and_then(|block| undefined_ident_in_block(block, env))
+            }),
+        Stmt::While {
+            condition, body, ..
+        } => undefined_ident(condition, env).or_else(|| undefined_ident_in_block(body, env)),
+        _ => None,
+    })
+}
+
+const U256_MAX_DEC: &str =
+    "115792089237316195423570985008687907853269984665640564039457584007913129639935";
+const I128_MIN_ABS_DEC: &str = "170141183460469231731687303715884105728";
+
+fn decimal_pow2(exp: u32) -> String {
+    let mut digits = vec![1u8];
+    for _ in 0..exp {
+        let mut carry = 0u8;
+        for digit in &mut digits {
+            let doubled = *digit * 2 + carry;
+            *digit = doubled % 10;
+            carry = doubled / 10;
+        }
+        if carry > 0 {
+            digits.push(carry);
+        }
+    }
+    digits.iter().rev().map(|d| char::from(b'0' + *d)).collect()
+}
+
+fn decimal_minus_one(value: &str) -> String {
+    let mut digits: Vec<u8> = value.bytes().rev().map(|b| b - b'0').collect();
+    for digit in &mut digits {
+        if *digit > 0 {
+            *digit -= 1;
+            break;
+        }
+        *digit = 9;
+    }
+    while digits.len() > 1 && digits.last() == Some(&0) {
+        digits.pop();
+    }
+    digits.iter().rev().map(|d| char::from(b'0' + *d)).collect()
+}
+
+fn canonical_decimal(s: &str) -> String {
+    let trimmed = s.trim_start_matches('0');
+    if trimmed.is_empty() {
+        "0".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn decimal_lte(a: &str, b: &str) -> bool {
+    let a = canonical_decimal(a);
+    let b = canonical_decimal(b);
+    a.len() < b.len() || (a.len() == b.len() && a <= b)
+}
+
+fn literal_decimal_value(expr: &Expr) -> Option<(bool, String)> {
+    match expr {
+        Expr::IntLit(n) if *n < 0 => Some((true, n.unsigned_abs().to_string())),
+        Expr::IntLit(n) => Some((false, n.to_string())),
+        Expr::BigIntLit(n) => Some((false, canonical_decimal(n))),
+        Expr::UnaryOp {
+            op: UnaryOp::Neg,
+            operand,
+        } => {
+            let (negative, magnitude) = literal_decimal_value(operand)?;
+            if magnitude == "0" {
+                Some((false, magnitude))
+            } else {
+                Some((!negative, magnitude))
+            }
+        }
+        _ => None,
+    }
+}
+
+fn unsigned_bits(ty: &Type) -> Option<u32> {
+    match ty {
+        Type::U8 => Some(8),
+        Type::U16 => Some(16),
+        Type::U32 => Some(32),
+        Type::U64 | Type::Gas => Some(64),
+        Type::U128 => Some(128),
+        Type::U256 | Type::Wallet | Type::TxHash => Some(256),
+        _ => None,
+    }
+}
+
+fn signed_bits(ty: &Type) -> Option<u32> {
+    match ty {
+        Type::I8 => Some(8),
+        Type::I16 => Some(16),
+        Type::I32 => Some(32),
+        Type::I64 => Some(64),
+        Type::I128 => Some(128),
+        _ => None,
+    }
+}
+
+fn expr_fits_type(expr: &Expr, expected: &Type) -> bool {
+    match (expr, expected) {
+        (Expr::BoolLit(_), Type::Bool)
+        | (Expr::StringLit(_), Type::String)
+        | (Expr::AddressLit(_), Type::Address) => return true,
+        _ => {}
+    }
+
+    let Some((negative, magnitude)) = literal_decimal_value(expr) else {
+        return false;
+    };
+
+    if let Some(bits) = unsigned_bits(expected) {
+        if negative {
+            return false;
+        }
+        let max = if bits == 256 {
+            U256_MAX_DEC.to_string()
+        } else {
+            decimal_minus_one(&decimal_pow2(bits))
+        };
+        return decimal_lte(&magnitude, &max);
+    }
+
+    if let Some(bits) = signed_bits(expected) {
+        let min_abs = if bits == 128 {
+            I128_MIN_ABS_DEC.to_string()
+        } else {
+            decimal_pow2(bits - 1)
+        };
+        if negative {
+            return decimal_lte(&magnitude, &min_abs);
+        }
+        return decimal_lte(&magnitude, &decimal_minus_one(&min_abs));
+    }
+
+    false
 }
 
 /// Infer the type of an expression from the environment
@@ -370,22 +719,41 @@ fn infer_expr_type(expr: &Expr, env: &TypeEnv) -> Option<Type> {
     match expr {
         Expr::IntLit(n) => {
             // Infer minimal type from literal value
-            if *n >= 0 && *n <= 255 { Some(Type::U8) }
-            else if *n >= 0 && *n <= 65535 { Some(Type::U16) }
-            else if *n >= 0 && *n <= 4294967295 { Some(Type::U32) }
-            else if *n >= 0 { Some(Type::U64) }
-            else { Some(Type::I64) }
+            if *n >= 0 && *n <= 255 {
+                Some(Type::U8)
+            } else if *n >= 0 && *n <= 65535 {
+                Some(Type::U16)
+            } else if *n >= 0 && *n <= 4294967295 {
+                Some(Type::U32)
+            } else if *n >= 0 && *n <= u64::MAX as i128 {
+                Some(Type::U64)
+            } else if *n >= 0 {
+                Some(Type::U128)
+            } else if *n >= i64::MIN as i128 {
+                Some(Type::I64)
+            } else {
+                Some(Type::I128)
+            }
         }
+        Expr::BigIntLit(_) => Some(Type::U256),
         Expr::FloatLit(_) => None, // No float type yet
         Expr::BoolLit(_) => Some(Type::Bool),
         Expr::StringLit(_) => Some(Type::String),
+        Expr::AddressLit(_) => Some(Type::Address),
+        Expr::HexLit(_) => Some(Type::U256),
         Expr::Ident(name) => env.lookup(name).cloned(),
         Expr::BinOp { left, op, right } => {
             let lt = infer_expr_type(left, env);
             let rt = infer_expr_type(right, env);
             match op {
-                BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt |
-                BinOp::Lte | BinOp::Gte | BinOp::And | BinOp::Or => Some(Type::Bool),
+                BinOp::Eq
+                | BinOp::Neq
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::Lte
+                | BinOp::Gte
+                | BinOp::And
+                | BinOp::Or => Some(Type::Bool),
                 _ => {
                     // Arithmetic: promote to wider type
                     match (lt, rt) {
@@ -396,12 +764,10 @@ fn infer_expr_type(expr: &Expr, env: &TypeEnv) -> Option<Type> {
                 }
             }
         }
-        Expr::UnaryOp { op, operand } => {
-            match op {
-                UnaryOp::Not => Some(Type::Bool),
-                UnaryOp::Neg => infer_expr_type(operand, env),
-            }
-        }
+        Expr::UnaryOp { op, operand } => match op {
+            UnaryOp::Not => Some(Type::Bool),
+            UnaryOp::Neg => infer_negated_expr_type(operand, env),
+        },
         Expr::FnCall { name, .. } => {
             // Would need function signature registry for full inference
             // For now, return None (unknown)
@@ -409,6 +775,19 @@ fn infer_expr_type(expr: &Expr, env: &TypeEnv) -> Option<Type> {
             None
         }
         _ => None,
+    }
+}
+
+fn infer_negated_expr_type(expr: &Expr, env: &TypeEnv) -> Option<Type> {
+    match expr {
+        Expr::IntLit(n) if *n >= 0 && *n <= 128 => Some(Type::I8),
+        Expr::IntLit(n) if *n >= 0 && *n <= 32768 => Some(Type::I16),
+        Expr::IntLit(n) if *n >= 0 && *n <= 2147483648 => Some(Type::I32),
+        Expr::IntLit(n) if *n >= 0 && *n <= 9223372036854775808_i128 => Some(Type::I64),
+        Expr::IntLit(_) => Some(Type::I128),
+        Expr::BigIntLit(n) if decimal_lte(n, I128_MIN_ABS_DEC) => Some(Type::I128),
+        Expr::BigIntLit(_) => None,
+        _ => infer_expr_type(expr, env).filter(is_signed),
     }
 }
 
@@ -428,9 +807,10 @@ fn check_overflow_safety(func: &FnDef, env: &mut TypeEnv) {
             if matches!(op, AssignOp::SubAssign) {
                 if let Some(ty) = target_ty.as_ref().filter(|t| is_unsigned(t)) {
                     // Check if the invariants already guard against this
-                    let has_guard = func.invariants.iter().any(|inv| {
-                        invariant_guards_underflow(&inv.expr, &target_name, value)
-                    });
+                    let has_guard = func
+                        .invariants
+                        .iter()
+                        .any(|inv| invariant_guards_underflow(&inv.expr, &target_name, value));
 
                     if !has_guard {
                         env.warnings.push(TypeWarning {
@@ -471,8 +851,22 @@ fn invariant_guards_underflow(inv: &InvariantExpr, var_name: &str, _value: &Expr
         InvariantExpr::Comparison { left, op, right } => {
             // Pattern: var >= value (guards underflow)
             match (left.as_ref(), op, right.as_ref()) {
-                (InvTerm::Var { name, is_post: false }, CmpOp::Gte, _) if name == var_name => true,
-                (_, CmpOp::Lte, InvTerm::Var { name, is_post: false }) if name == var_name => true,
+                (
+                    InvTerm::Var {
+                        name,
+                        is_post: false,
+                    },
+                    CmpOp::Gte,
+                    _,
+                ) if name == var_name => true,
+                (
+                    _,
+                    CmpOp::Lte,
+                    InvTerm::Var {
+                        name,
+                        is_post: false,
+                    },
+                ) if name == var_name => true,
                 _ => false,
             }
         }
@@ -487,11 +881,16 @@ fn invariant_guards_underflow(inv: &InvariantExpr, var_name: &str, _value: &Expr
 // --- Type utilities ---
 
 fn is_unsigned(ty: &Type) -> bool {
-    matches!(ty, Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::U256 | Type::Gas)
+    matches!(
+        ty,
+        Type::U8 | Type::U16 | Type::U32 | Type::U64 | Type::U128 | Type::U256 | Type::Gas
+    )
 }
 
 fn types_compatible(got: &Type, expected: &Type) -> bool {
-    if got == expected { return true; }
+    if got == expected {
+        return true;
+    }
     // Allow implicit widening: u8 → u16 → u32 → u64 → u128
     let got_rank = type_rank(got);
     let expected_rank = type_rank(expected);
@@ -507,7 +906,10 @@ fn same_signedness(a: &Type, b: &Type) -> bool {
 }
 
 fn is_signed(ty: &Type) -> bool {
-    matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128)
+    matches!(
+        ty,
+        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+    )
 }
 
 fn type_rank(ty: &Type) -> u32 {
@@ -531,16 +933,25 @@ fn promote_types(a: &Type, b: &Type) -> Type {
 
 fn format_type(ty: &Type) -> String {
     match ty {
-        Type::U8 => "u8".into(), Type::U16 => "u16".into(),
-        Type::U32 => "u32".into(), Type::U64 => "u64".into(),
-        Type::U128 => "u128".into(), Type::U256 => "u256".into(),
-        Type::I8 => "i8".into(), Type::I16 => "i16".into(),
-        Type::I32 => "i32".into(), Type::I64 => "i64".into(),
+        Type::U8 => "u8".into(),
+        Type::U16 => "u16".into(),
+        Type::U32 => "u32".into(),
+        Type::U64 => "u64".into(),
+        Type::U128 => "u128".into(),
+        Type::U256 => "u256".into(),
+        Type::I8 => "i8".into(),
+        Type::I16 => "i16".into(),
+        Type::I32 => "i32".into(),
+        Type::I64 => "i64".into(),
         Type::I128 => "i128".into(),
-        Type::Bool => "bool".into(), Type::Address => "Address".into(),
-        Type::String => "String".into(), Type::Unit => "()".into(),
-        Type::Wallet => "Wallet".into(), Type::Signature => "Signature".into(),
-        Type::TxHash => "TxHash".into(), Type::Gas => "Gas".into(),
+        Type::Bool => "bool".into(),
+        Type::Address => "Address".into(),
+        Type::String => "String".into(),
+        Type::Unit => "()".into(),
+        Type::Wallet => "Wallet".into(),
+        Type::Signature => "Signature".into(),
+        Type::TxHash => "TxHash".into(),
+        Type::Gas => "Gas".into(),
         Type::Array(t) => format!("[{}]", format_type(t)),
         Type::Map(k, v) => format!("Map<{}, {}>", format_type(k), format_type(v)),
         Type::Option(t) => format!("Option<{}>", format_type(t)),
@@ -554,25 +965,47 @@ fn format_type(ty: &Type) -> String {
 pub fn print_type_report(env: &TypeEnv) {
     if !env.errors.is_empty() {
         eprintln!();
-        eprintln!("{}", "╔══════════════════════════════════════════════════╗".bright_red());
-        eprintln!("{}", "║         ANVIL TYPE ERRORS                        ║".bright_red());
-        eprintln!("{}", "╚══════════════════════════════════════════════════╝".bright_red());
+        eprintln!(
+            "{}",
+            "╔══════════════════════════════════════════════════╗".bright_red()
+        );
+        eprintln!(
+            "{}",
+            "║         ANVIL TYPE ERRORS                        ║".bright_red()
+        );
+        eprintln!(
+            "{}",
+            "╚══════════════════════════════════════════════════╝".bright_red()
+        );
         eprintln!();
         for err in &env.errors {
-            eprintln!("  {} [{}] {}", "✗".bright_red().bold(), err.location, err.message);
+            eprintln!(
+                "  {} [{}] {}",
+                "✗".bright_red().bold(),
+                err.location,
+                err.message
+            );
         }
     }
 
     if !env.warnings.is_empty() {
         eprintln!();
         for warn in &env.warnings {
-            eprintln!("  {} [{}] {}", "⚠".bright_yellow(), warn.location, warn.message);
+            eprintln!(
+                "  {} [{}] {}",
+                "⚠".bright_yellow(),
+                warn.location,
+                warn.message
+            );
         }
     }
 
     if !env.constraints.is_empty() && env.errors.is_empty() {
-        eprintln!("  {} {} type constraints registered for Z3",
-            "✓".bright_green(), env.constraints.len());
+        eprintln!(
+            "  {} {} type constraints registered for Z3",
+            "✓".bright_green(),
+            env.constraints.len()
+        );
     }
 }
 
@@ -600,9 +1033,17 @@ fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64
 "#;
         let program = parser::parse_program(src).unwrap();
         let env = check_program(&program);
-        assert!(env.errors.is_empty(), "Unexpected type errors: {:?}", env.errors);
+        assert!(
+            env.errors.is_empty(),
+            "Unexpected type errors: {:?}",
+            env.errors
+        );
         // Should have constraints for sender_balance, receiver_balance, amount (2 each: non-neg + upper bound)
-        assert!(env.constraints.len() >= 6, "Expected >= 6 constraints, got {}", env.constraints.len());
+        assert!(
+            env.constraints.len() >= 6,
+            "Expected >= 6 constraints, got {}",
+            env.constraints.len()
+        );
     }
 
     #[test]

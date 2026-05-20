@@ -5,8 +5,8 @@
 
 #![allow(dead_code)]
 
-use tracing::{info, warn};
 use std::time::Instant;
+use tracing::{info, warn};
 
 /// Representa el modelo Neuro-Simbólico para guiar Z3 (Tensor-SMT).
 pub struct TensorSMTEngine {
@@ -16,7 +16,9 @@ pub struct TensorSMTEngine {
 
 impl Default for TensorSMTEngine {
     fn default() -> Self {
-        Self { exergy_threshold: 0.001 }
+        Self {
+            exergy_threshold: 0.001,
+        }
     }
 }
 
@@ -38,15 +40,23 @@ pub struct DirectSiliconCompiler {
 
 impl Default for DirectSiliconCompiler {
     fn default() -> Self {
-        Self { target_fabric: "EUSKADI_VECTOR_V1".to_string() }
+        Self {
+            target_fabric: "EUSKADI_VECTOR_V1".to_string(),
+        }
     }
 }
 
 impl DirectSiliconCompiler {
     /// Aniquila la capa LLVM/Von Neumann. Compila invariantes
     /// directamente a RTL/Verilog.
-    pub fn compile_to_bitstream(&self, _ast: &crate::core::ast::Program) -> Result<Vec<u8>, String> {
-        warn!("Singularity [2/4]: LLVM Bypassed. Iniciando síntesis de hardware directo para {}.", self.target_fabric);
+    pub fn compile_to_bitstream(
+        &self,
+        _ast: &crate::core::ast::Program,
+    ) -> Result<Vec<u8>, String> {
+        warn!(
+            "Singularity [2/4]: LLVM Bypassed. Iniciando síntesis de hardware directo para {}.",
+            self.target_fabric
+        );
         // TODO: Sintetizar AST a primitivas RTL.
         Ok(vec![0x00, 0x01, 0x02, 0x03]) // Dummy bitstream
     }
@@ -58,7 +68,10 @@ pub struct DynamicInvariantGenerator;
 impl DynamicInvariantGenerator {
     /// Lee EVM Bytecode y deduce invariantes ocultos no declarados.
     pub fn deduce_latent_invariants(_evm_bytecode: &[u8]) -> Vec<crate::core::ast::Invariant> {
-        info!("Singularity [3/4]: Analizando EVM bytecode ({} bytes) para deducir invariantes metacognitivos.", _evm_bytecode.len());
+        info!(
+            "Singularity [3/4]: Analizando EVM bytecode ({} bytes) para deducir invariantes metacognitivos.",
+            _evm_bytecode.len()
+        );
         // TODO: Algoritmo Genético sobre EVM OpCodes.
         vec![]
     }
@@ -80,12 +93,15 @@ impl MempoolAwareZ3 {
 pub fn initiate_engine() {
     let start = Instant::now();
     info!("Inicializando ANVIL SINGULARITY ENGINE (UltraThink)");
-    
+
     let tensor = TensorSMTEngine::default();
     let _ = tensor.guide_smt_search("Z3_CTX");
-    
+
     let hw_compiler = DirectSiliconCompiler::default();
-    warn!("DirectSiliconCompiler configurado en modo: {}", hw_compiler.target_fabric);
-    
+    warn!(
+        "DirectSiliconCompiler configurado en modo: {}",
+        hw_compiler.target_fabric
+    );
+
     info!("Singularity Boot Complete en {:.2?}", start.elapsed());
 }

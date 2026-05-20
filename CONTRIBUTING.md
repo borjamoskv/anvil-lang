@@ -6,7 +6,7 @@ Thank you for your interest in contributing to Anvil — a formally verified pro
 
 ### Prerequisites
 
-1. **Rust** (stable, ≥ 1.80)
+1. **Rust** (stable, ≥ 1.85)
    ```bash
    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
    rustup default stable
@@ -38,11 +38,40 @@ cargo build
 
 ```bash
 # Unit tests
-cargo test
+cargo test --bin anvil -- --test-threads=1
 
 # Verify example programs
 cargo run -- check examples/hello.anv
 cargo run -- check examples/transfer.anv
+```
+
+### CI Profiles
+
+Run the lightweight gate before pushing:
+
+```bash
+scripts/ci-quick.sh
+```
+
+This runs format, compile checks, root unit tests, and Proof Market unit tests.
+
+Run the full gate when touching proof, integration, Proof Market, or release paths:
+
+```bash
+scripts/ci-full.sh
+```
+
+This runs integration tests, Python Proof Market checks, hello/transfer example verification, and release builds.
+
+If branch protection requires named checks, use `Quick Checks`, `Full Checks`, and `Security Audit`.
+
+### Cache Hygiene
+
+This repo may use a shared Cargo target directory. Prefer package-scoped cleanup over deleting the whole target cache:
+
+```bash
+scripts/clean-builds.sh --dry-run
+scripts/clean-builds.sh
 ```
 
 ## Code Style
@@ -56,12 +85,12 @@ cargo fmt -- --check  # Verify
 cargo fmt             # Auto-fix
 ```
 
-### Linting
+### Static Checks
 
-All code must pass `clippy` with zero warnings:
+All code must pass the lightweight compile check:
 
 ```bash
-cargo clippy -- -D warnings
+cargo check --bin anvil
 ```
 
 ### Commit Messages
@@ -87,18 +116,18 @@ ci: add MSRV matrix build
 3. Make your changes
 4. Ensure CI passes locally:
    ```bash
-   cargo fmt -- --check
-   cargo clippy -- -D warnings
-   cargo test
+   scripts/ci-quick.sh
    ```
+   Run the full gate above when the PR touches proof, integration, Proof Market, or release paths.
 5. Push and open a Pull Request against `main`
 6. Fill in the PR template
 
 ### PR Requirements
 
 - [ ] `cargo fmt` passes
-- [ ] `cargo clippy -- -D warnings` passes
-- [ ] All tests pass
+- [ ] Quick checks pass
+- [ ] Full checks run when touching proof, integration, Proof Market, or release paths
+- [ ] Build-cache cleanup, if needed, used `scripts/clean-builds.sh`
 - [ ] Documentation updated (if applicable)
 - [ ] Breaking changes documented
 
@@ -110,7 +139,7 @@ Anvil examples live in `examples/`. To add a new example:
 2. Add comments explaining what the example demonstrates
 3. Include both **passing** and **failing** invariants where appropriate
 4. Add a row to the Examples table in `README.md`
-5. The CI will automatically verify your example
+5. Verify it locally with `cargo run --bin anvil -- check examples/your_example.anv` and include the command in the PR testing notes.
 
 ### Example template:
 

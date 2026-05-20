@@ -4,6 +4,7 @@ Cargo.lock
 *.swp
 *.swo
 .DS_Store
+.metadata_never_index
 
 # CORTEX-Persist: Sovereign Bounty Boundary (Zero-Day Leak Prevention)
 # Do not commit active exploits, drafts, or Immunefi targets to the public repo.
@@ -31,6 +32,11 @@ anvil.db
 # Build artifacts
 cache/
 out/
+services/proof-market/target/
+editors/vscode/node_modules/
+human-anomalies/node_modules/
+human-anomalies/dist/
+agents-archi-mvp/sdk-ts/node_modules/
 
 # Python bytecode
 __pycache__/

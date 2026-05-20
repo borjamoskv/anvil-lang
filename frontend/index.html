@@ -484,7 +484,7 @@
         <!-- AUTHORIZATION CARD -->
         <div class="info-card" id="auth-card">
             <h3>Authorization</h3>
-            <p style="margin-bottom: 1rem; font-size: 0.75rem;">High-exergy proofs (>500 chars) require an active key.</p>
+            <p style="margin-bottom: 1rem; font-size: 0.75rem;">Every verification request requires an active key.</p>
             <div style="display: flex; flex-direction: column; gap: 0.75rem;">
                 <input type="password" id="exergy-key" placeholder="x-exergy-key" 
                     style="background: var(--bg-3); border: 1px solid var(--border); color: var(--accent); padding: 0.6rem; font-family: var(--mono); font-size: 0.75rem; width: 100%; outline: none;">
@@ -526,7 +526,7 @@
 
         <div class="info-card">
             <h3>Observability</h3>
-            <p>Prometheus metrics at <a href="/metrics" style="color: var(--accent);">/metrics</a></p>
+                <p>Prometheus metrics at <a href="/metrics" style="color: var(--accent);">/metrics</a> require an active key.</p>
             <p style="margin-top: 0.5rem;">Health check at <a href="/health" style="color: var(--accent);">/health</a></p>
         </div>
     </div>
@@ -607,22 +607,62 @@ fn withdraw(balance: u64, amount: u64) -> u64
     const charCount = document.getElementById('char-count');
     const keyInput = document.getElementById('exergy-key');
     const authStatus = document.getElementById('auth-status');
+    const MAX_SOURCE_BYTES = 50 * 1024;
 
-    // Persistence
-    keyInput.value = localStorage.getItem('x-exergy-key') || '';
+    function safeGetItem(key) {
+        try {
+            return localStorage.getItem(key);
+        } catch {
+            return null;
+        }
+    }
+
+    function safeSetItem(key, value) {
+        try {
+            localStorage.setItem(key, value);
+        } catch {}
+    }
+
+    keyInput.value = '';
+
+    function sourceByteLength() {
+        return new TextEncoder().encode(textarea.value).length;
+    }
+
+    function updateByteCount() {
+        const bytes = sourceByteLength();
+        charCount.textContent = bytes + ' bytes';
+        charCount.style.color = bytes > MAX_SOURCE_BYTES ? 'var(--red)' : 'var(--text-muted)';
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#39;'
+        }[char]));
+    }
     
     textarea.addEventListener('input', () => {
-        charCount.textContent = textarea.value.length + ' chars';
+        updateByteCount();
     });
-    charCount.textContent = textarea.value.length + ' chars';
+    updateByteCount();
 
     keyInput.addEventListener('input', () => {
-        localStorage.setItem('x-exergy-key', keyInput.value);
+        authStatus.style.display = 'none';
+        authStatus.textContent = '';
     });
 
     async function validateCurrentKey() {
         const key = keyInput.value.trim();
-        if (!key) return;
+        if (!key) {
+            authStatus.style.display = 'block';
+            authStatus.textContent = 'KEY REQUIRED';
+            authStatus.style.color = 'var(--red)';
+            return;
+        }
 
         authStatus.style.display = 'block';
         authStatus.innerHTML = '<span class="spinner"></span>VALIDATING...';
@@ -634,22 +674,26 @@ fn withdraw(balance: u64, amount: u64) -> u64
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ key })
             });
+            if (!r.ok) {
+                throw new Error(`HTTP ${r.status}`);
+            }
             const data = await r.json();
             if (data.valid) {
-                authStatus.innerHTML = `✓ ACTIVE [${data.tier}] - OWNER: ${data.owner}`;
+                authStatus.textContent = `ACTIVE [${data.tier || 'unknown'}] - OWNER: ${data.owner || 'unknown'}`;
                 authStatus.style.color = 'var(--green)';
             } else {
-                authStatus.innerHTML = '✗ INVALID OR REVOKED';
+                authStatus.textContent = 'INVALID OR REVOKED';
                 authStatus.style.color = 'var(--red)';
             }
         } catch (e) {
-            authStatus.innerHTML = '✗ CONNECTION ERROR';
+            authStatus.textContent = `CONNECTION ERROR: ${e.message}`;
+            authStatus.style.color = 'var(--red)';
         }
     }
 
     function loadExample(key) {
         textarea.value = EXAMPLES[key];
-        charCount.textContent = textarea.value.length + ' chars';
+        updateByteCount();
         document.getElementById('result-panel').style.display = 'none';
     }
 
@@ -667,12 +711,23 @@ fn withdraw(balance: u64, amount: u64) -> u64
 
     async function submitVerification() {
         const btn = document.getElementById('verify-btn');
-        const code = textarea.value.trim();
+        const rawCode = textarea.value;
+        const code = rawCode.trim();
+        const sourceBytes = new TextEncoder().encode(rawCode).length;
         const resultPanel = document.getElementById('result-panel');
         const resultContent = document.getElementById('result-content');
         const resultTitle = document.getElementById('result-title');
 
         if (!code) return;
+        if (sourceBytes > MAX_SOURCE_BYTES) {
+            resultPanel.style.display = 'block';
+            resultTitle.textContent = '✗ PAYLOAD TOO LARGE';
+            resultContent.innerHTML =
+	`<span class="result-rejected">STATUS  : PAYLOAD_TOO_LARGE</span>
+	<span class="result-muted">MESSAGE : source_code exceeds the 50KB strict limit.</span>
+	<span class="result-muted">SIZE    : ${escapeHtml(sourceBytes)} bytes</span>`;
+            return;
+        }
 
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>PROVING...';
@@ -688,51 +743,57 @@ fn withdraw(balance: u64, amount: u64) -> u64
             const response = await fetch('/v1/verify', {
                 method: 'POST',
                 headers: headers,
-                body: JSON.stringify({ source_code: code })
+                body: JSON.stringify({ source_code: rawCode })
             });
 
-            if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            const raw = await response.text();
+            let data;
+            try {
+                data = JSON.parse(raw);
+            } catch {
+                data = {
+                    status: `HTTP_${response.status}`,
+                    message: raw || response.statusText,
+                    timestamp: new Date().toISOString(),
+                    certificate_hash: null
+                };
             }
-
-            const data = await response.json();
             resultPanel.style.display = 'block';
 
             if (data.status === 'VERIFIED') {
                 resultTitle.textContent = '✓ PROVEN — Certificate Issued';
                 resultContent.innerHTML =
-`<span class="result-verified">STATUS  : ${data.status}</span>
-<span class="result-muted">MESSAGE : ${data.message}</span>
-<span class="result-muted">TIME    : ${data.timestamp}</span>
+	`<span class="result-verified">STATUS  : ${escapeHtml(data.status)}</span>
+	<span class="result-muted">MESSAGE : ${escapeHtml(data.message)}</span>
+	<span class="result-muted">TIME    : ${escapeHtml(data.timestamp)}</span>
 
-<span class="result-muted">─── CRYPTOGRAPHIC CERTIFICATE ──────────────────</span>
-HASH    : <span class="result-hash">${data.certificate_hash}</span>
-<span class="result-muted">────────────────────────────────────────────────</span>
+	<span class="result-muted">─── CRYPTOGRAPHIC CERTIFICATE ──────────────────</span>
+	HASH    : <span class="result-hash">${escapeHtml(data.certificate_hash)}</span>
+	<span class="result-muted">────────────────────────────────────────────────</span>
 
-<span class="result-muted">Z3 returned UNSAT — no counterexample exists.
+	<span class="result-muted">Z3 returned UNSAT — no counterexample exists.
 The invariants hold universally over the state space.</span>`;
             } else {
-                resultTitle.textContent = '✗ REJECTED — Invariant Violated';
+                resultTitle.textContent = response.ok
+                    ? '✗ REJECTED — Verification Not Proven'
+                    : `✗ ${data.status || `HTTP_${response.status}`}`;
                 resultContent.innerHTML =
-`<span class="result-rejected">STATUS  : ${data.status}</span>
-<span class="result-muted">MESSAGE : ${data.message}</span>
-<span class="result-muted">TIME    : ${data.timestamp}</span>
-
-<span class="result-muted">Z3 found a counterexample — the invariants cannot be proven.
-The code is mathematically unsound under the stated constraints.</span>`;
+	`<span class="result-rejected">STATUS  : ${escapeHtml(data.status || `HTTP_${response.status}`)}</span>
+	<span class="result-muted">MESSAGE : ${escapeHtml(data.message || response.statusText)}</span>
+	<span class="result-muted">TIME    : ${escapeHtml(data.timestamp || new Date().toISOString())}</span>`;
             }
 
         } catch (e) {
             resultPanel.style.display = 'block';
             resultTitle.textContent = '✗ CONNECTION ERROR';
             resultContent.innerHTML =
-`<span class="result-rejected">ERROR: ${e.message}</span>
+	`<span class="result-rejected">ERROR: ${escapeHtml(e.message)}</span>
 
-<span class="result-muted">Start the backend with:
-  cargo run -- serve --port 3000
+	<span class="result-muted">Start the backend with:
+	  cargo run --bin anvil -- saas --port 3000
 
-Or via Docker:
-  docker compose up</span>`;
+	Or via Docker:
+	  docker compose up -p 4242</span>`;
         } finally {
             btn.disabled = false;
             btn.innerHTML = '⊢ Verify';

@@ -3,248 +3,904 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CORTEX-Persist | Proof Markets</title>
+    <title>Anvil Proof Market</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Inter:wght@300;500;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;650&display=swap');
 
         :root {
-            --bg-color: #0A0A0A;
-            --surface: #111111;
-            --border: #222222;
-            --text-primary: #F0F0F0;
-            --text-secondary: #888888;
-            --accent: #2B3BE5; /* Sovereign Blue */
-            --accent-glow: rgba(43, 59, 229, 0.4);
-            --danger: #E52B2B;
-            --danger-glow: rgba(229, 43, 43, 0.4);
-            --success: #2BE570;
-            --success-glow: rgba(43, 229, 112, 0.4);
+            --bg: #090a0b;
+            --surface: #101214;
+            --surface-2: #15191c;
+            --line: #252b30;
+            --text: #eef2f1;
+            --muted: #87908c;
+            --faint: #59625f;
+            --blue: #3d6df2;
+            --cyan: #30c6d6;
+            --green: #27d980;
+            --red: #ff4d61;
+            --amber: #e5b84b;
+            --mono: "IBM Plex Mono", ui-monospace, monospace;
+            --sans: "Inter", system-ui, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         body {
-            background-color: var(--bg-color);
-            color: var(--text-primary);
-            font-family: 'Inter', sans-serif;
-            margin: 0;
-            padding: 0;
-            display: flex;
-            justify-content: center;
-            align-items: center;
             min-height: 100vh;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 900px;
-            padding: 40px;
-        }
-
-        header {
-            margin-bottom: 30px;
-            border-bottom: 1px solid var(--border);
-            padding-bottom: 20px;
-        }
-
-        h1 {
-            font-size: 24px;
-            font-weight: 700;
-            letter-spacing: -1px;
             margin: 0;
-            text-transform: uppercase;
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
         }
 
-        h1 span {
-            color: var(--accent);
-        }
-
-        p.subtitle {
-            color: var(--text-secondary);
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 12px;
-            margin-top: 10px;
-        }
-
-        .editor-container {
-            background-color: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 4px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
+        button,
+        input,
         textarea {
-            width: 100%;
-            height: 350px;
-            background-color: transparent;
-            color: var(--text-primary);
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 14px;
-            line-height: 1.5;
-            border: none;
-            outline: none;
-            resize: vertical;
-        }
-
-        .actions {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .fee {
-            font-family: 'JetBrains Mono', monospace;
-            color: var(--text-secondary);
-            font-size: 13px;
+            font: inherit;
         }
 
         button {
-            background-color: var(--accent);
-            color: #fff;
-            border: none;
-            padding: 12px 24px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 14px;
-            font-weight: 700;
             cursor: pointer;
+        }
+
+        .app {
+            width: min(1280px, 100%);
+            margin: 0 auto;
+            padding: 24px;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            padding-bottom: 18px;
+            border-bottom: 1px solid var(--line);
+        }
+
+        .brand {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .brand h1 {
+            margin: 0;
+            font-size: 1.05rem;
+            letter-spacing: 0;
+            font-weight: 650;
+        }
+
+        .brand span {
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.76rem;
+        }
+
+        .engine {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-height: 34px;
+            padding: 0 12px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface);
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.76rem;
+            white-space: nowrap;
+        }
+
+        .engine-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--amber);
+        }
+
+        .engine.online .engine-dot {
+            background: var(--green);
+        }
+
+        .engine.offline .engine-dot {
+            background: var(--red);
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 360px;
+            gap: 18px;
+            padding-top: 18px;
+        }
+
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface);
+            overflow: hidden;
+        }
+
+        .panel-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            min-height: 45px;
+            gap: 12px;
+            padding: 0 14px;
+            background: var(--surface-2);
+            border-bottom: 1px solid var(--line);
+        }
+
+        .panel-title {
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.74rem;
             text-transform: uppercase;
-            box-shadow: 0 0 15px var(--accent-glow);
-            transition: all 0.2s ease;
         }
 
-        button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 0 25px var(--accent-glow);
+        .tiny {
+            color: var(--faint);
+            font-family: var(--mono);
+            font-size: 0.72rem;
         }
 
-        button:disabled {
-            background-color: var(--border);
-            color: var(--text-secondary);
+        textarea {
+            display: block;
+            width: 100%;
+            min-height: 460px;
+            padding: 18px;
+            border: 0;
+            outline: 0;
+            resize: vertical;
+            background: #0b0d0e;
+            color: #d9f6df;
+            font-family: var(--mono);
+            font-size: 0.86rem;
+            line-height: 1.62;
+            tab-size: 4;
+        }
+
+        .editor-foot {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 12px 14px;
+            border-top: 1px solid var(--line);
+            background: var(--surface-2);
+        }
+
+        .primary {
+            min-height: 38px;
+            padding: 0 16px;
+            border: 0;
+            border-radius: 6px;
+            background: var(--blue);
+            color: white;
+            font-family: var(--mono);
+            font-size: 0.82rem;
+            font-weight: 600;
+        }
+
+        .primary:disabled {
+            background: #293036;
+            color: var(--faint);
             cursor: not-allowed;
-            box-shadow: none;
-            transform: none;
         }
 
-        .console {
-            margin-top: 30px;
-            background-color: #000;
-            border: 1px solid var(--border);
-            padding: 20px;
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 12px;
-            color: var(--text-secondary);
-            min-height: 100px;
-            white-space: pre-wrap;
+        .side {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .control {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            padding: 14px;
+        }
+
+        label {
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            text-transform: uppercase;
+        }
+
+        input {
+            width: 100%;
+            min-height: 37px;
+            padding: 0 10px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            outline: 0;
+            background: #0b0d0e;
+            color: var(--text);
+            font-family: var(--mono);
+            font-size: 0.78rem;
+        }
+
+        input:focus,
+        textarea:focus {
+            border-color: var(--cyan);
+        }
+
+        button:focus-visible,
+        input:focus-visible,
+        textarea:focus-visible {
+            outline: 2px solid var(--cyan);
+            outline-offset: 2px;
+        }
+
+        .segmented {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+        }
+
+        .segment {
+            min-height: 36px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: #0b0d0e;
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.76rem;
+        }
+
+        .segment.active {
+            border-color: var(--cyan);
+            color: var(--text);
+            background: rgba(48, 198, 214, 0.11);
+        }
+
+        .examples {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 8px;
+            padding: 14px;
+        }
+
+        .example {
+            min-height: 35px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: #0b0d0e;
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.76rem;
+            text-align: left;
+            padding: 0 10px;
+        }
+
+        .example:hover {
+            border-color: var(--cyan);
+            color: var(--text);
+        }
+
+        .result {
             display: none;
+            margin-top: 18px;
         }
 
-        .success { color: var(--success); text-shadow: 0 0 10px var(--success-glow); }
-        .error { color: var(--danger); text-shadow: 0 0 10px var(--danger-glow); }
-        
-        .crt-overlay {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.06), rgba(0, 255, 0, 0.02), rgba(0, 0, 255, 0.06));
-            background-size: 100% 2px, 3px 100%;
-            pointer-events: none;
-            z-index: 100;
-            opacity: 0.15;
+        .result.show {
+            display: block;
+        }
+
+        .result-body {
+            display: grid;
+            gap: 12px;
+            padding: 14px;
+        }
+
+        .status-line {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 8px;
+            font-family: var(--mono);
+            font-size: 0.82rem;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            min-height: 26px;
+            padding: 0 9px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.72rem;
+        }
+
+        .pill.ok {
+            color: var(--green);
+            border-color: rgba(39, 217, 128, 0.45);
+        }
+
+        .pill.bad {
+            color: var(--red);
+            border-color: rgba(255, 77, 97, 0.45);
+        }
+
+        .pill.warn {
+            color: var(--amber);
+            border-color: rgba(229, 184, 75, 0.45);
+        }
+
+        pre {
+            min-height: 130px;
+            max-height: 360px;
+            overflow: auto;
+            margin: 0;
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: #050606;
+            color: #d4ddda;
+            font-family: var(--mono);
+            font-size: 0.76rem;
+            line-height: 1.55;
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .hash-row {
+            display: none;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .hash-row.show {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+        }
+
+        .hash {
+            min-height: 35px;
+            padding: 9px 10px;
+            border: 1px solid rgba(39, 217, 128, 0.36);
+            border-radius: 6px;
+            color: var(--green);
+            background: rgba(39, 217, 128, 0.06);
+            font-family: var(--mono);
+            font-size: 0.74rem;
+            overflow-wrap: anywhere;
+        }
+
+        .copy {
+            min-height: 35px;
+            padding: 0 10px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: var(--surface-2);
+            color: var(--muted);
+            font-family: var(--mono);
+            font-size: 0.74rem;
+        }
+
+        .hint {
+            color: var(--muted);
+            font-size: 0.82rem;
+            line-height: 1.5;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid rgba(255, 255, 255, 0.35);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @media (max-width: 860px) {
+            .app {
+                padding: 14px;
+            }
+
+            header {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .grid {
+                grid-template-columns: 1fr;
+            }
+
+            textarea {
+                min-height: 360px;
+            }
         }
     </style>
 </head>
 <body>
-    <div class="crt-overlay"></div>
-    <div class="container">
+    <div class="app">
         <header>
-            <h1>CORTEX <span>Proof Markets</span></h1>
-            <p class="subtitle">> FORMAL VERIFICATION AS A SERVICE // Z3 SMT ENGINE</p>
+            <div class="brand">
+                <h1>Anvil Proof Market</h1>
+                <span>local oracle / Z3 verification / certificate output</span>
+            </div>
+            <div class="engine" id="engine" role="status" aria-live="polite">
+                <span class="engine-dot"></span>
+                <span id="engineText">checking</span>
+            </div>
         </header>
 
-        <div class="editor-container">
-            <textarea id="sourceCode" spellcheck="false">
-// ============================================================
-// CORTEX-Persist: AMM Pool (Automated Market Maker)
-// Vulnerable a Integer Overflow en el Invariante
-// ============================================================
+        <main class="grid">
+            <section>
+                <div class="panel">
+                    <div class="panel-head">
+                        <div class="panel-title">source.anv</div>
+                        <div class="tiny" id="charCount">0 bytes</div>
+                    </div>
+                    <textarea id="sourceCode" spellcheck="false" aria-label="Source code"></textarea>
+                    <div class="editor-foot">
+                        <div class="tiny" id="paymentHint">payment: mock</div>
+                        <button class="primary" id="verifyBtn" type="button">Verify</button>
+                    </div>
+                </div>
 
-struct AMMPool { reserve_x: u64, reserve_y: u64 }
+                <div class="panel result" id="resultPanel" aria-busy="false">
+                    <div class="panel-head">
+                        <div class="panel-title" id="resultTitle">result</div>
+                        <div class="tiny" id="resultMeta">idle</div>
+                    </div>
+                    <div class="result-body">
+                        <div class="status-line" role="status" aria-live="polite">
+                            <span class="pill" id="resultStatus">WAITING</span>
+                            <span id="resultMessage">No run yet.</span>
+                        </div>
+                        <div class="hash-row" id="hashRow">
+                            <div class="hash" id="certHash"></div>
+                            <button class="copy" id="copyCert" type="button">Copy</button>
+                        </div>
+                        <pre id="solverOutput"></pre>
+                    </div>
+                </div>
+            </section>
 
-fn swap_with_fee(reserve_x: u64, reserve_y: u64, amount_in_x: u64) -> u64
-    where {
-        reserve_x > 0, reserve_y > 0, amount_in_x > 0,
-        reserve_x' * reserve_y' >= reserve_x * reserve_y
-    }
-{
-    let amount_in_with_fee = amount_in_x * 99;
-    let denominator = (reserve_x * 100) + amount_in_with_fee;
-    let numerator = amount_in_with_fee * reserve_y;
-    
-    let amount_out_y = numerator / denominator;
-    
-    reserve_x += amount_in_x;
-    reserve_y -= amount_out_y;
-    
-    return amount_out_y;
-}</textarea>
-        </div>
+            <aside class="side">
+                <div class="panel">
+                    <div class="panel-head">
+                        <div class="panel-title">endpoint</div>
+                    </div>
+                    <div class="control">
+                        <label for="endpointUrl">oracle url</label>
+                        <input id="endpointUrl" autocomplete="off">
+                        <label for="clientId">client id</label>
+                        <input id="clientId" autocomplete="off">
+                    </div>
+                </div>
 
-        <div class="actions">
-            <div class="fee">VERIFICATION_FEE: $500.00 USD</div>
-            <button id="verifyBtn" onclick="submitProof()">Execute Verification Strike</button>
-        </div>
+                <div class="panel">
+                    <div class="panel-head">
+                        <div class="panel-title">payment</div>
+                    </div>
+                    <div class="control">
+                        <div class="segmented">
+                            <button class="segment active" id="modeMock" type="button" aria-pressed="true">Mock</button>
+                            <button class="segment" id="modeStripe" type="button" aria-pressed="false">Stripe</button>
+                        </div>
+                        <div id="stripeBlock">
+                            <label for="stripeSession">checkout session</label>
+                            <input id="stripeSession" placeholder="cs_test_..." autocomplete="off">
+                        </div>
+                        <div class="hint" id="modeText"></div>
+                    </div>
+                </div>
 
-        <div class="console" id="outputConsole"></div>
+                <div class="panel">
+                    <div class="panel-head">
+                        <div class="panel-title">examples</div>
+                    </div>
+                    <div class="examples">
+                        <button class="example" type="button" data-example="safe">safe transfer</button>
+                        <button class="example" type="button" data-example="unsafe">missing credit counterexample</button>
+                        <button class="example" type="button" data-example="k2">close-factor bypass</button>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-head">
+                        <div class="panel-title">runtime</div>
+                    </div>
+                    <div class="control">
+                        <div class="hint" id="runtimeText"></div>
+                    </div>
+                </div>
+            </aside>
+        </main>
     </div>
 
     <script>
-        async function submitProof() {
-            const btn = document.getElementById('verifyBtn');
-            const consoleEl = document.getElementById('outputConsole');
-            const code = document.getElementById('sourceCode').value;
-            
-            btn.disabled = true;
-            btn.innerText = 'PROVING...';
-            consoleEl.style.display = 'block';
-            consoleEl.innerHTML = '[*] Establishing zero-trust channel with Oracle...\n[*] Compiling AST and dispatching to Z3 SMT Solver...\n';
-            consoleEl.className = 'console';
+        const EXAMPLES = {
+            safe: `fn transfer(mut sender_balance: u64, mut receiver_balance: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        sender_balance >= amount,
+        sender_balance' + receiver_balance' == sender_balance + receiver_balance,
+        sender_balance' == sender_balance - amount,
+        receiver_balance' == receiver_balance + amount
+    }
+{
+    sender_balance -= amount;
+    receiver_balance += amount;
+    return sender_balance;
+}`,
+            unsafe: `fn bad_transfer(mut sender_balance: u64, mut receiver_balance: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        sender_balance >= amount,
+        sender_balance' + receiver_balance' == sender_balance + receiver_balance,
+        sender_balance' == sender_balance - amount,
+        receiver_balance' == receiver_balance + amount
+    }
+{
+    sender_balance -= amount;
+    return sender_balance;
+}`,
+            k2: `fn double_liquidation_bypass(
+    debt: u64,
+    first_call: u64,
+    second_call: u64,
+    mut total_liquidated: u64
+) -> u64
+where {
+    debt > 0,
+    first_call > 0,
+    second_call > 0,
+    first_call <= debt / 2,
+    second_call <= (debt - first_call) / 2,
+    total_liquidated' <= debt / 2
+} {
+    total_liquidated += first_call;
+    total_liquidated += second_call;
+    return total_liquidated;
+}`
+        };
 
+        const MAX_SOURCE_BYTES = 50 * 1024;
+        const isHttp = location.protocol === "http:" || location.protocol === "https:";
+        const defaultEndpoint = isHttp ? "/v1/prove" : "http://127.0.0.1:8000/v1/prove";
+        const defaultHealth = isHttp ? "/health" : "http://127.0.0.1:8000/health";
+
+        function safeGetItem(key) {
             try {
-                // Pointing to the local Oracle (main.py)
-                const res = await fetch('http://127.0.0.1:8000/v1/prove', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        source_code: code,
-                        stripe_session_id: 'cs_test_CORTEX2026'
-                    })
-                });
-
-                const data = await res.json();
-                
-                if (data.status === 'PROVEN_SAFE') {
-                    consoleEl.innerHTML += `\n[+] Z3 RESOLUTION: SAT\n[+] Execution Time: ${data.execution_time_ms.toFixed(2)}ms\n`;
-                    consoleEl.innerHTML += `\n<span class="success">CERTIFICATE ISSUED: ${data.certificate_hash}</span>`;
-                    consoleEl.classList.add('success');
-                } else if (data.status === 'VULNERABILITY_DETECTED') {
-                    consoleEl.innerHTML += `\n[-] Z3 RESOLUTION: UNSAT (Invariante Falsado)\n[-] Execution Time: ${data.execution_time_ms.toFixed(2)}ms\n`;
-                    consoleEl.innerHTML += `\n<span class="error">CRITICAL VULNERABILITY DETECTED</span>\n\n${data.z3_output}`;
-                    consoleEl.classList.add('error');
-                } else {
-                    consoleEl.innerHTML += `\n[-] ORACLE ERROR: ${JSON.stringify(data)}`;
-                }
-            } catch (err) {
-                // Fallback simulation in case the python backend isn't running
-                setTimeout(() => {
-                    consoleEl.innerHTML += `\n[-] Z3 RESOLUTION: UNSAT (Invariante Falsado)\n[-] Execution Time: 4.5ms\n`;
-                    consoleEl.innerHTML += `\n<span class="error">CRITICAL VULNERABILITY DETECTED</span>\n\n`;
-                    consoleEl.innerHTML += `[!] Counterexample (C5-REAL):\n    reserve_x = 184467440737095544\n    reserve_y = 6224765\n    amount_in = 22822\n\n>> Denominator Integer Overflow. Invariant Broken.`;
-                }, 1500);
-            } finally {
-                setTimeout(() => {
-                    btn.disabled = false;
-                    btn.innerText = 'Execute Verification Strike';
-                }, 1500);
+                return localStorage.getItem(key);
+            } catch {
+                return null;
             }
         }
+
+        const storedMode = safeGetItem("proof-market-payment-mode");
+        const state = {
+            paymentMode: storedMode === "stripe" ? "stripe" : "mock",
+            lastCertificate: "",
+            revision: 0
+        };
+
+        const sourceCode = document.getElementById("sourceCode");
+        const charCount = document.getElementById("charCount");
+        const endpointUrl = document.getElementById("endpointUrl");
+        const clientId = document.getElementById("clientId");
+        const stripeSession = document.getElementById("stripeSession");
+        const verifyBtn = document.getElementById("verifyBtn");
+        const resultPanel = document.getElementById("resultPanel");
+        const resultTitle = document.getElementById("resultTitle");
+        const resultMeta = document.getElementById("resultMeta");
+        const resultStatus = document.getElementById("resultStatus");
+        const resultMessage = document.getElementById("resultMessage");
+        const hashRow = document.getElementById("hashRow");
+        const certHash = document.getElementById("certHash");
+        const solverOutput = document.getElementById("solverOutput");
+        const modeMock = document.getElementById("modeMock");
+        const modeStripe = document.getElementById("modeStripe");
+        const stripeBlock = document.getElementById("stripeBlock");
+        const modeText = document.getElementById("modeText");
+        const paymentHint = document.getElementById("paymentHint");
+        const engine = document.getElementById("engine");
+        const engineText = document.getElementById("engineText");
+        const runtimeText = document.getElementById("runtimeText");
+
+        sourceCode.value = safeGetItem("proof-market-source") || EXAMPLES.safe;
+        endpointUrl.value = safeGetItem("proof-market-endpoint") || defaultEndpoint;
+        clientId.value = safeGetItem("proof-market-client") || "local-demo";
+        stripeSession.value = "";
+
+        function safeSetItem(key, value) {
+            try {
+                localStorage.setItem(key, value);
+            } catch {
+                // The editor keeps working even if localStorage quota is full.
+            }
+        }
+
+        function updateCounts() {
+            const bytes = new TextEncoder().encode(sourceCode.value).length;
+            charCount.textContent = `${bytes} bytes`;
+            charCount.style.color = bytes > MAX_SOURCE_BYTES ? "var(--red)" : "var(--faint)";
+        }
+
+        function clearResultState() {
+            state.lastCertificate = "";
+            certHash.textContent = "";
+            hashRow.classList.remove("show");
+            resultPanel.classList.remove("show");
+            resultPanel.setAttribute("aria-busy", "false");
+            resultMeta.textContent = "idle";
+            document.getElementById("copyCert").textContent = "Copy";
+        }
+
+        function markContextChanged() {
+            state.revision += 1;
+            clearResultState();
+        }
+
+        function setPaymentMode(mode) {
+            const normalizedMode = mode === "stripe" ? "stripe" : "mock";
+            state.paymentMode = normalizedMode;
+            safeSetItem("proof-market-payment-mode", normalizedMode);
+            modeMock.classList.toggle("active", normalizedMode === "mock");
+            modeStripe.classList.toggle("active", normalizedMode === "stripe");
+            modeMock.setAttribute("aria-pressed", normalizedMode === "mock" ? "true" : "false");
+            modeStripe.setAttribute("aria-pressed", normalizedMode === "stripe" ? "true" : "false");
+            stripeBlock.style.display = normalizedMode === "stripe" ? "block" : "none";
+            paymentHint.textContent = `payment: ${normalizedMode}`;
+            modeText.textContent = normalizedMode === "mock"
+                ? "Uses the real /v1/prove endpoint with payment_mode=mock. Backend must be started with ANVIL_ALLOW_MOCK_PAYMENT=1."
+                : "Uses a real Stripe Checkout session. The backend checks paid status, client binding, amount, and currency before running Anvil.";
+        }
+
+        function healthUrl() {
+            const endpoint = endpointUrl.value.trim() || defaultEndpoint;
+            try {
+                const url = new URL(endpoint, location.href);
+                url.pathname = "/health";
+                url.search = "";
+                url.hash = "";
+                return url.toString();
+            } catch {
+                return defaultHealth;
+            }
+        }
+
+        async function refreshHealth() {
+            try {
+                const response = await fetch(healthUrl());
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                engine.className = "engine online";
+                engineText.textContent = "oracle online";
+            } catch {
+                engine.className = "engine offline";
+                engineText.textContent = "oracle offline";
+            }
+        }
+
+        function showResult({ status, message, output, certificate, httpStatus, elapsed }) {
+            resultPanel.classList.add("show");
+            const isCounterexample = status === "VULNERABILITY_DETECTED";
+            resultTitle.textContent = status === "PROVEN_SAFE"
+                ? "certificate"
+                : isCounterexample ? "counterexample" : "oracle status";
+            resultMeta.textContent = `http ${httpStatus} / ${elapsed.toFixed(0)} ms`;
+            resultStatus.textContent = status || "UNKNOWN";
+            resultStatus.className = "pill";
+
+            if (status === "PROVEN_SAFE" && certificate) {
+                resultStatus.classList.add("ok");
+                resultMessage.textContent = message || "Proof accepted.";
+                hashRow.classList.add("show");
+                certHash.textContent = certificate;
+                state.lastCertificate = certificate || "";
+            } else if (isCounterexample) {
+                resultStatus.classList.add("bad");
+                resultMessage.textContent = message || "No certificate was issued.";
+                hashRow.classList.remove("show");
+                state.lastCertificate = "";
+            } else {
+                resultStatus.classList.add("warn");
+                resultMessage.textContent = message || "The oracle returned a non-final state.";
+                hashRow.classList.remove("show");
+                state.lastCertificate = "";
+            }
+
+            solverOutput.textContent = output || "";
+            resultPanel.setAttribute("aria-busy", "false");
+        }
+
+        function showPending() {
+            resultPanel.classList.add("show");
+            resultPanel.setAttribute("aria-busy", "true");
+            resultTitle.textContent = "verification";
+            resultMeta.textContent = "running";
+            resultStatus.textContent = "VERIFYING";
+            resultStatus.className = "pill warn";
+            resultMessage.textContent = "Proof in progress.";
+            hashRow.classList.remove("show");
+            certHash.textContent = "";
+            solverOutput.textContent = "";
+            state.lastCertificate = "";
+        }
+
+        async function submitProof() {
+            const code = sourceCode.value;
+            const sourceBytes = new TextEncoder().encode(code).length;
+            if (sourceBytes > MAX_SOURCE_BYTES) {
+                showResult({
+                    status: "PAYLOAD_TOO_LARGE",
+                    message: "source_code exceeds the 50KB strict limit.",
+                    output: `${sourceBytes} bytes > ${MAX_SOURCE_BYTES} bytes`,
+                    certificate: null,
+                    httpStatus: 413,
+                    elapsed: 0
+                });
+                return;
+            }
+            if (!code.trim()) {
+                showResult({
+                    status: "EMPTY_SOURCE",
+                    message: "Paste an .anv file before requesting a proof.",
+                    output: "",
+                    certificate: null,
+                    httpStatus: 0,
+                    elapsed: 0
+                });
+                return;
+            }
+
+            const endpoint = endpointUrl.value.trim() || defaultEndpoint;
+            const body = {
+                client_id: clientId.value.trim() || "local-demo",
+                payment_mode: state.paymentMode,
+                source_code: code
+            };
+
+            if (state.paymentMode === "stripe") {
+                const session = stripeSession.value.trim();
+                if (!session) {
+                    showResult({
+                        status: "MISSING_STRIPE_SESSION",
+                        message: "Stripe mode needs a Checkout session id.",
+                        output: "",
+                        certificate: null,
+                        httpStatus: 0,
+                        elapsed: 0
+                    });
+                    return;
+                }
+                body.stripe_session_id = session;
+            }
+
+            verifyBtn.disabled = true;
+            verifyBtn.innerHTML = '<span class="spinner"></span> Verifying';
+            const requestRevision = state.revision;
+            showPending();
+            const started = performance.now();
+
+            try {
+                const response = await fetch(endpoint, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(body)
+                });
+                const raw = await response.text();
+                let data;
+                try {
+                    data = JSON.parse(raw);
+                } catch {
+                    data = {
+                        status: "ORACLE_ERROR",
+                        z3_output: raw || response.statusText
+                    };
+                }
+                const output = data.z3_output || data.detail || data.message || raw || response.statusText;
+                const status = data.status || (response.ok ? "UNKNOWN" : `HTTP_${response.status}`);
+                const message = data.detail || data.message || (
+                    status === "PROVEN_SAFE" ? "Cryptographic certificate issued." : "Review solver output."
+                );
+
+                if (requestRevision !== state.revision) {
+                    return;
+                }
+                showResult({
+                    status,
+                    message,
+                    output,
+                    certificate: data.certificate_hash,
+                    httpStatus: response.status,
+                    elapsed: performance.now() - started
+                });
+                if (state.paymentMode === "stripe" && response.ok) {
+                    stripeSession.value = "";
+                }
+            } catch (error) {
+                if (requestRevision !== state.revision) {
+                    return;
+                }
+                showResult({
+                    status: "CONNECTION_ERROR",
+                    message: error.message,
+                    output: `Endpoint: ${endpoint}`,
+                    certificate: null,
+                    httpStatus: 0,
+                    elapsed: performance.now() - started
+                });
+            } finally {
+                verifyBtn.disabled = false;
+                verifyBtn.textContent = "Verify";
+                resultPanel.setAttribute("aria-busy", "false");
+                refreshHealth();
+            }
+        }
+
+        sourceCode.addEventListener("input", () => {
+            safeSetItem("proof-market-source", sourceCode.value);
+            updateCounts();
+            markContextChanged();
+        });
+        endpointUrl.addEventListener("input", () => {
+            safeSetItem("proof-market-endpoint", endpointUrl.value);
+            markContextChanged();
+            refreshHealth();
+        });
+        clientId.addEventListener("input", () => {
+            safeSetItem("proof-market-client", clientId.value);
+            markContextChanged();
+        });
+        stripeSession.addEventListener("input", markContextChanged);
+        modeMock.addEventListener("click", () => {
+            if (state.paymentMode !== "mock") {
+                setPaymentMode("mock");
+                markContextChanged();
+            }
+        });
+        modeStripe.addEventListener("click", () => {
+            if (state.paymentMode !== "stripe") {
+                setPaymentMode("stripe");
+                markContextChanged();
+            }
+        });
+        verifyBtn.addEventListener("click", submitProof);
+        document.getElementById("copyCert").addEventListener("click", async () => {
+            if (state.lastCertificate) {
+                const button = document.getElementById("copyCert");
+                try {
+                    await navigator.clipboard.writeText(state.lastCertificate);
+                    button.textContent = "Copied";
+                } catch {
+                    button.textContent = "Failed";
+                }
+                setTimeout(() => {
+                    button.textContent = "Copy";
+                }, 1400);
+            }
+        });
+
+        document.querySelectorAll("[data-example]").forEach((button) => {
+            button.addEventListener("click", () => {
+                sourceCode.value = EXAMPLES[button.dataset.example];
+                safeSetItem("proof-market-source", sourceCode.value);
+                updateCounts();
+                markContextChanged();
+            });
+        });
+
+        runtimeText.textContent = "Mock payment requires ANVIL_ALLOW_MOCK_PAYMENT=1. Certificates require ANVIL_CERTIFICATE_SECRET. Stripe mode requires STRIPE_API_KEY plus expected amount/currency env vars.";
+        setPaymentMode(state.paymentMode);
+        updateCounts();
+        refreshHealth();
     </script>
 </body>
 </html>

@@ -24,10 +24,9 @@ pest_derive = "2.7"
 z3 = "0.12"
 
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage"] }
 
 # Error reporting
-miette = { version = "7", features = ["fancy"] }
 thiserror = "2"
 
 # Colored terminal output
@@ -47,11 +46,20 @@ sha2 = "0.10"
 sha3 = "0.10"
 hex = "0.4"
 chrono = "0.4"
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite"] }
+libsqlite3-sys = { version = "0.30.1", default-features = false, features = ["bundled_bindings"] }
 
 # Observability
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "env-filter"] }
 metrics = "0.24"
-metrics-exporter-prometheus = "0.16"
+metrics-exporter-prometheus = { version = "0.16", default-features = false, features = ["http-listener"] }
 uuid = { version = "1.23.1", features = ["v4"] }
+
+[profile.dev]
+debug = 0
+incremental = false
+
+[profile.test]
+debug = 0
+incremental = false

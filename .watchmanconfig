@@ -1,0 +1,13 @@
+{
+  "ignore_dirs": [
+    "target",
+    "node_modules",
+    "dist",
+    "artifacts",
+    "services/proof-market/target",
+    "human-anomalies/node_modules",
+    "human-anomalies/dist",
+    "editors/vscode/node_modules",
+    "agents-archi-mvp/sdk-ts/node_modules"
+  ]
+}

@@ -138,5 +138,5 @@ xcode-select --install
 | Component | Minimum | Recommended |
 |---|---|---|
 | Z3 | 4.8 | Latest stable |
-| Rust | 1.80 | Latest stable |
+| Rust | 1.85 | Latest stable |
 | Clang | 11 | Latest stable |

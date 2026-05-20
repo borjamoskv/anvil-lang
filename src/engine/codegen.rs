@@ -13,7 +13,7 @@ pub fn generate_rust(program: &Program) -> String {
     out.push_str("// Zero runtime assertions needed. Trust is proven, not assumed.\n\n");
 
     // Detect if Map type is used anywhere — if so, add HashMap import
-    let uses_map = program.items.iter().any(|item| item_uses_map(item));
+    let uses_map = program.items.iter().any(item_uses_map);
     if uses_map {
         out.push_str("use std::collections::HashMap;\n\n");
     }
@@ -38,12 +38,16 @@ fn item_uses_map(item: &Item) -> bool {
         Item::Function(f) => {
             f.params.iter().any(|p| matches!(&p.ty, Type::Map(_, _)))
                 || matches!(&f.return_type, Some(Type::Map(_, _)))
-        },
+        }
         Item::Struct(s) => s.fields.iter().any(|f| matches!(&f.ty, Type::Map(_, _))),
         Item::Contract(c) => {
-            c.state_vars.iter().any(|sv| matches!(&sv.ty, Type::Map(_, _)))
-                || c.functions.iter().any(|f| item_uses_map(&Item::Function(f.clone())))
-        },
+            c.state_vars
+                .iter()
+                .any(|sv| matches!(&sv.ty, Type::Map(_, _)))
+                || c.functions
+                    .iter()
+                    .any(|f| item_uses_map(&Item::Function(f.clone())))
+        }
         _ => false,
     }
 }
@@ -53,22 +57,37 @@ fn gen_function(f: &FnDef) -> String {
 
     // Doc comment with invariants
     if !f.invariants.is_empty() {
-        out.push_str(&format!("/// Verified invariants ({} proven):\n", f.invariants.len()));
+        out.push_str(&format!(
+            "/// Verified invariants ({} proven):\n",
+            f.invariants.len()
+        ));
         for (i, inv) in f.invariants.iter().enumerate() {
-            out.push_str(&format!("/// #{}: {}\n", i + 1, format_invariant(&inv.expr)));
+            out.push_str(&format!(
+                "/// #{}: {}\n",
+                i + 1,
+                format_invariant(&inv.expr)
+            ));
         }
     }
 
     // Function signature
-    if f.is_pub { out.push_str("pub "); }
+    if f.is_pub {
+        out.push_str("pub ");
+    }
     out.push_str(&format!("fn {}(", f.name));
 
-    let params: Vec<String> = f.params.iter().map(|p| {
-        let mut s = String::new();
-        if p.is_mut { s.push_str("mut "); }
-        s.push_str(&format!("{}: {}", p.name, gen_type(&p.ty)));
-        s
-    }).collect();
+    let params: Vec<String> = f
+        .params
+        .iter()
+        .map(|p| {
+            let mut s = String::new();
+            if p.is_mut {
+                s.push_str("mut ");
+            }
+            s.push_str(&format!("{}: {}", p.name, gen_type(&p.ty)));
+            s
+        })
+        .collect();
     out.push_str(&params.join(", "));
     out.push(')');
 
@@ -85,11 +104,15 @@ fn gen_function(f: &FnDef) -> String {
 
 fn gen_struct(s: &StructDef) -> String {
     let mut out = String::new();
-    if s.is_pub { out.push_str("pub "); }
+    if s.is_pub {
+        out.push_str("pub ");
+    }
     out.push_str(&format!("struct {} {{\n", s.name));
     for f in &s.fields {
         out.push_str("    ");
-        if f.is_pub { out.push_str("pub "); }
+        if f.is_pub {
+            out.push_str("pub ");
+        }
         out.push_str(&format!("{}: {},\n", f.name, gen_type(&f.ty)));
     }
     out.push_str("}\n");
@@ -97,7 +120,12 @@ fn gen_struct(s: &StructDef) -> String {
 }
 
 fn gen_const(c: &ConstDef) -> String {
-    format!("const {}: {} = {};\n", c.name, gen_type(&c.ty), gen_expr(&c.value))
+    format!(
+        "const {}: {} = {};\n",
+        c.name,
+        gen_type(&c.ty),
+        gen_expr(&c.value)
+    )
 }
 
 fn gen_contract(c: &ContractDef) -> String {
@@ -133,33 +161,48 @@ fn gen_block(block: &Block, indent: usize) -> String {
     for stmt in &block.stmts {
         out.push_str(&pad);
         match stmt {
-            Stmt::Let { name, ty, is_mut, value } => {
+            Stmt::Let {
+                name,
+                ty,
+                is_mut,
+                value,
+            } => {
                 out.push_str("let ");
-                if *is_mut { out.push_str("mut "); }
+                if *is_mut {
+                    out.push_str("mut ");
+                }
                 out.push_str(name);
                 if let Some(t) = ty {
                     out.push_str(&format!(": {}", gen_type(t)));
                 }
                 out.push_str(&format!(" = {};\n", gen_expr(value)));
-            },
+            }
             Stmt::Assign { target, op, value } => {
                 out.push_str(&gen_lvalue(target));
                 out.push_str(&format!(" {} ", gen_assign_op(op)));
                 out.push_str(&format!("{};\n", gen_expr(value)));
-            },
+            }
             Stmt::Return(Some(e)) => {
                 out.push_str(&format!("return {};\n", gen_expr(e)));
-            },
-            Stmt::Return(None) => { out.push_str("return;\n"); },
+            }
+            Stmt::Return(None) => {
+                out.push_str("return;\n");
+            }
             Stmt::Assert { condition, message } => {
                 if let Some(msg) = message {
-                    out.push_str(&format!("debug_assert!({}, \"{}\");\n", gen_expr(condition), msg));
+                    out.push_str(&format!("assert!({}, \"{}\");\n", gen_expr(condition), msg));
                 } else {
-                    out.push_str(&format!("debug_assert!({});\n", gen_expr(condition)));
+                    out.push_str(&format!("assert!({});\n", gen_expr(condition)));
                 }
-            },
-            Stmt::Expr(e) => { out.push_str(&format!("{};\n", gen_expr(e))); },
-            Stmt::If { condition, then_block, else_block } => {
+            }
+            Stmt::Expr(e) => {
+                out.push_str(&format!("{};\n", gen_expr(e)));
+            }
+            Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
                 out.push_str(&format!("if {} {{\n", gen_expr(condition)));
                 out.push_str(&gen_block(then_block, indent + 1));
                 out.push_str(&pad);
@@ -169,22 +212,24 @@ fn gen_block(block: &Block, indent: usize) -> String {
                     out.push_str(&pad);
                 }
                 out.push_str("}\n");
-            },
-            Stmt::While { condition, body, .. } => {
+            }
+            Stmt::While {
+                condition, body, ..
+            } => {
                 out.push_str(&format!("while {} {{\n", gen_expr(condition)));
                 out.push_str(&gen_block(body, indent + 1));
                 out.push_str(&pad);
                 out.push_str("}\n");
-            },
+            }
             Stmt::Emit { event, args } => {
                 // Emit compiles to a log/event marker in Rust
-                let a: Vec<String> = args.iter().map(|a| gen_expr(a)).collect();
+                let a: Vec<String> = args.iter().map(gen_expr).collect();
                 out.push_str(&format!("// EMIT: {}({})\n", event, a.join(", ")));
-            },
+            }
             Stmt::Ghost { name, .. } => {
                 // Ghost statements are proof-only — stripped from silicon output
                 out.push_str(&format!("// GHOST: {} (proof-domain only)\n", name));
-            },
+            }
         }
     }
 
@@ -193,19 +238,26 @@ fn gen_block(block: &Block, indent: usize) -> String {
 
 fn gen_type(ty: &Type) -> String {
     match ty {
-        Type::U8 => "u8".into(), Type::U16 => "u16".into(),
-        Type::U32 => "u32".into(), Type::U64 => "u64".into(),
-        Type::U128 => "u128".into(), Type::U256 => "U256".into(),
-        Type::I8 => "i8".into(), Type::I16 => "i16".into(),
-        Type::I32 => "i32".into(), Type::I64 => "i64".into(),
+        Type::U8 => "u8".into(),
+        Type::U16 => "u16".into(),
+        Type::U32 => "u32".into(),
+        Type::U64 => "u64".into(),
+        Type::U128 => "u128".into(),
+        Type::U256 => "U256".into(),
+        Type::I8 => "i8".into(),
+        Type::I16 => "i16".into(),
+        Type::I32 => "i32".into(),
+        Type::I64 => "i64".into(),
         Type::I128 => "i128".into(),
-        Type::Bool => "bool".into(), Type::Address => "[u8; 20]".into(),
-        Type::String => "String".into(), Type::Unit => "()".into(),
+        Type::Bool => "bool".into(),
+        Type::Address => "[u8; 20]".into(),
+        Type::String => "String".into(),
+        Type::Unit => "()".into(),
         // Sovereign on-chain types → native Rust representations
-        Type::Wallet => "[u8; 32]".into(),     // 32-byte public key
-        Type::Signature => "[u8; 65]".into(),  // 65-byte ECDSA signature
-        Type::TxHash => "[u8; 32]".into(),     // 32-byte transaction hash
-        Type::Gas => "u64".into(),             // Gas counter
+        Type::Wallet => "[u8; 32]".into(),    // 32-byte public key
+        Type::Signature => "[u8; 65]".into(), // 65-byte ECDSA signature
+        Type::TxHash => "[u8; 32]".into(),    // 32-byte transaction hash
+        Type::Gas => "u64".into(),            // Gas counter
         Type::Array(t) => format!("Vec<{}>", gen_type(t)),
         Type::Map(k, v) => format!("HashMap<{}, {}>", gen_type(k), gen_type(v)),
         Type::Option(t) => format!("Option<{}>", gen_type(t)),
@@ -217,6 +269,7 @@ fn gen_type(ty: &Type) -> String {
 fn gen_expr(expr: &Expr) -> String {
     match expr {
         Expr::IntLit(n) => n.to_string(),
+        Expr::BigIntLit(n) => n.clone(),
         Expr::FloatLit(f) => f.to_string(),
         Expr::BoolLit(b) => b.to_string(),
         Expr::StringLit(s) => format!("\"{}\"", s),
@@ -224,26 +277,39 @@ fn gen_expr(expr: &Expr) -> String {
         Expr::AddressLit(a) => format!("Address::from(\"{}\")", a),
         Expr::Ident(name) => name.clone(),
         Expr::BinOp { left, op, right } => {
-            format!("({} {} {})", gen_expr(left), gen_bin_op(op), gen_expr(right))
-        },
+            format!(
+                "({} {} {})",
+                gen_expr(left),
+                gen_bin_op(op),
+                gen_expr(right)
+            )
+        }
         Expr::UnaryOp { op, operand } => {
             format!("{}{}", gen_unary_op(op), gen_expr(operand))
-        },
+        }
         Expr::FnCall { name, args } => {
-            let a: Vec<String> = args.iter().map(|a| gen_expr(a)).collect();
+            let a: Vec<String> = args.iter().map(gen_expr).collect();
             format!("{}({})", name, a.join(", "))
-        },
-        Expr::MethodCall { object, method, args } => {
-            let a: Vec<String> = args.iter().map(|a| gen_expr(a)).collect();
+        }
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => {
+            let a: Vec<String> = args.iter().map(gen_expr).collect();
             format!("{}.{}({})", gen_expr(object), method, a.join(", "))
-        },
+        }
         Expr::FieldAccess { object, field } => {
             format!("{}.{}", gen_expr(object), field)
-        },
+        }
         Expr::Index { object, index } => {
             format!("{}[{}]", gen_expr(object), gen_expr(index))
-        },
-        Expr::If { condition, then_block, else_block } => {
+        }
+        Expr::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
             let mut s = format!("if {} {{ ", gen_expr(condition));
             s.push_str(&gen_block(then_block, 0));
             if let Some(eb) = else_block {
@@ -252,34 +318,57 @@ fn gen_expr(expr: &Expr) -> String {
             }
             s.push('}');
             s
-        },
-        Expr::Block(b) => { let mut s = "{ ".to_string(); s.push_str(&gen_block(b, 0)); s.push('}'); s },
+        }
+        Expr::Block(b) => {
+            let mut s = "{ ".to_string();
+            s.push_str(&gen_block(b, 0));
+            s.push('}');
+            s
+        }
     }
 }
 
 fn gen_bin_op(op: &BinOp) -> &str {
     match op {
-        BinOp::Add => "+", BinOp::Sub => "-", BinOp::Mul => "*",
-        BinOp::Div => "/", BinOp::Mod => "%", BinOp::Eq => "==",
-        BinOp::Neq => "!=", BinOp::Lt => "<", BinOp::Gt => ">",
-        BinOp::Lte => "<=", BinOp::Gte => ">=",
-        BinOp::And => "&&", BinOp::Or => "||",
-        BinOp::BitAnd => "&", BinOp::BitOr => "|", BinOp::BitXor => "^",
-        BinOp::Shl => "<<", BinOp::Shr => ">>",
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Div => "/",
+        BinOp::Mod => "%",
+        BinOp::Eq => "==",
+        BinOp::Neq => "!=",
+        BinOp::Lt => "<",
+        BinOp::Gt => ">",
+        BinOp::Lte => "<=",
+        BinOp::Gte => ">=",
+        BinOp::And => "&&",
+        BinOp::Or => "||",
+        BinOp::BitAnd => "&",
+        BinOp::BitOr => "|",
+        BinOp::BitXor => "^",
+        BinOp::Shl => "<<",
+        BinOp::Shr => ">>",
     }
 }
 
 fn gen_unary_op(op: &UnaryOp) -> &str {
-    match op { UnaryOp::Neg => "-", UnaryOp::Not => "!" }
+    match op {
+        UnaryOp::Neg => "-",
+        UnaryOp::Not => "!",
+    }
 }
 
 fn gen_assign_op(op: &AssignOp) -> &str {
     match op {
-        AssignOp::Assign => "=", AssignOp::AddAssign => "+=",
-        AssignOp::SubAssign => "-=", AssignOp::MulAssign => "*=",
+        AssignOp::Assign => "=",
+        AssignOp::AddAssign => "+=",
+        AssignOp::SubAssign => "-=",
+        AssignOp::MulAssign => "*=",
         AssignOp::DivAssign => "/=",
-        AssignOp::BitAndAssign => "&=", AssignOp::BitOrAssign => "|=",
-        AssignOp::BitXorAssign => "^=", AssignOp::ShlAssign => "<<=",
+        AssignOp::BitAndAssign => "&=",
+        AssignOp::BitOrAssign => "|=",
+        AssignOp::BitXorAssign => "^=",
+        AssignOp::ShlAssign => "<<=",
         AssignOp::ShrAssign => ">>=",
     }
 }
@@ -295,8 +384,13 @@ fn gen_lvalue(lv: &LValue) -> String {
 fn format_invariant(inv: &InvariantExpr) -> String {
     match inv {
         InvariantExpr::Comparison { left, op, right } => {
-            format!("{} {} {}", format_inv_term(left), format_cmp_op(op), format_inv_term(right))
-        },
+            format!(
+                "{} {} {}",
+                format_inv_term(left),
+                format_cmp_op(op),
+                format_inv_term(right)
+            )
+        }
         InvariantExpr::And(a, b) => format!("({} ∧ {})", format_invariant(a), format_invariant(b)),
         InvariantExpr::Or(a, b) => format!("({} ∨ {})", format_invariant(a), format_invariant(b)),
         InvariantExpr::Not(a) => format!("¬({})", format_invariant(a)),
@@ -309,28 +403,58 @@ fn format_invariant(inv: &InvariantExpr) -> String {
 fn format_inv_term(term: &InvTerm) -> String {
     match term {
         InvTerm::Literal(n) => n.to_string(),
-        InvTerm::Var { name, is_post } => if *is_post { format!("{}'", name) } else { name.clone() },
+        InvTerm::BigLiteral(n) => n.clone(),
+        InvTerm::Var { name, is_post } => {
+            if *is_post {
+                format!("{}'", name)
+            } else {
+                name.clone()
+            }
+        }
         InvTerm::BinOp { left, op, right } => {
-            format!("({} {} {})", format_inv_term(left), match op {
-                ArithOp::Add => "+", ArithOp::Sub => "-", ArithOp::Mul => "×",
-                ArithOp::Div => "÷", ArithOp::Mod => "%",
-                ArithOp::BitAnd => "&", ArithOp::BitOr => "|", ArithOp::BitXor => "^",
-                ArithOp::Shl => "<<", ArithOp::Shr => ">>",
-            }, format_inv_term(right))
-        },
-        InvTerm::FieldAccess { object, field, is_post } => {
-            if *is_post { format!("{}.{}'", object, field) } else { format!("{}.{}", object, field) }
-        },
+            format!(
+                "({} {} {})",
+                format_inv_term(left),
+                match op {
+                    ArithOp::Add => "+",
+                    ArithOp::Sub => "-",
+                    ArithOp::Mul => "×",
+                    ArithOp::Div => "÷",
+                    ArithOp::Mod => "%",
+                    ArithOp::BitAnd => "&",
+                    ArithOp::BitOr => "|",
+                    ArithOp::BitXor => "^",
+                    ArithOp::Shl => "<<",
+                    ArithOp::Shr => ">>",
+                },
+                format_inv_term(right)
+            )
+        }
+        InvTerm::FieldAccess {
+            object,
+            field,
+            is_post,
+        } => {
+            if *is_post {
+                format!("{}.{}'", object, field)
+            } else {
+                format!("{}.{}", object, field)
+            }
+        }
         InvTerm::FnCall { name, args } => {
             let a: Vec<String> = args.iter().map(format_inv_term).collect();
             format!("{}({})", name, a.join(", "))
-        },
+        }
     }
 }
 
 fn format_cmp_op(op: &CmpOp) -> &str {
     match op {
-        CmpOp::Eq => "=", CmpOp::Neq => "≠", CmpOp::Lt => "<",
-        CmpOp::Gt => ">", CmpOp::Lte => "≤", CmpOp::Gte => "≥",
+        CmpOp::Eq => "=",
+        CmpOp::Neq => "≠",
+        CmpOp::Lt => "<",
+        CmpOp::Gt => ">",
+        CmpOp::Lte => "≤",
+        CmpOp::Gte => "≥",
     }
 }

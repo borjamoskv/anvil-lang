@@ -16,5 +16,8 @@
   },
   "dependencies": {
     "ethers": "^6.16.0"
+  },
+  "overrides": {
+    "ws": "8.20.1"
   }
 }

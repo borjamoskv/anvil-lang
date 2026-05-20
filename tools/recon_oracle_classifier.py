@@ -23,6 +23,28 @@ from enum import Enum
 from typing import Optional
 from datetime import datetime, timezone
 
+SOURCE_EXTS = ('.sol', '.vy')
+SKIP_DIRS = {
+    '.git',
+    '.hg',
+    '.svn',
+    '.pytest_cache',
+    '.mypy_cache',
+    '.ruff_cache',
+    '__pycache__',
+    '.venv',
+    'venv',
+    'node_modules',
+    'out',
+    'cache',
+    'artifacts',
+    'broadcast',
+    'dist',
+    'build',
+    'target',
+}
+MAX_SOURCE_BYTES = 2 * 1024 * 1024
+
 # ── Oracle Classification Taxonomy ──────────────────────────────
 
 class OracleType(Enum):
@@ -368,24 +390,33 @@ def generate_report(fingerprint: OracleFingerprint) -> str:
 def scan_directory(path: str) -> list:
     """Scan a directory of Solidity files and classify each."""
     results = []
-    sol_files = []
-    
+
     for root, dirs, files in os.walk(path):
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
         for f in files:
-            if f.endswith(('.sol', '.vy')):
-                sol_files.append(os.path.join(root, f))
-    
-    for sol_file in sol_files:
-        try:
-            with open(sol_file, 'r') as fh:
-                source = fh.read()
-            fp = classify_source(source)
-            fp.address = sol_file
-            results.append(fp)
-        except Exception as e:
-            print(f"  [!] Error scanning {sol_file}: {e}")
-    
+            if not f.endswith(SOURCE_EXTS):
+                continue
+
+            sol_file = os.path.join(root, f)
+            try:
+                source = read_source_file(sol_file)
+                if source is None:
+                    continue
+                fp = classify_source(source)
+                fp.address = sol_file
+                results.append(fp)
+            except Exception as e:
+                print(f"  [!] Error scanning {sol_file}: {e}")
+
     return results
+
+
+def read_source_file(path: str) -> Optional[str]:
+    if os.path.getsize(path) > MAX_SOURCE_BYTES:
+        print(f"  [!] Skipping oversized source: {path}")
+        return None
+    with open(path, 'r') as fh:
+        return fh.read()
 
 
 # ── CLI Entry Point ─────────────────────────────────────────────
@@ -422,8 +453,9 @@ def main():
                 else:
                     print(generate_report(fp))
         elif os.path.isfile(path):
-            with open(path, 'r') as f:
-                source = f.read()
+            source = read_source_file(path)
+            if source is None:
+                sys.exit(1)
             fp = classify_source(source)
             fp.address = path
             if args.json:

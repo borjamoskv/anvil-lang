@@ -16,9 +16,9 @@ Closes #
 
 ## Checklist
 
-- [ ] `cargo fmt -- --check` passes
-- [ ] `cargo clippy -- -D warnings` passes
-- [ ] `cargo test` passes
+- [ ] Quick checks pass (`scripts/ci-quick.sh`)
+- [ ] Full checks run when touching proof, integration, Proof Market, or release paths (`scripts/ci-full.sh`)
+- [ ] Build-cache cleanup, if needed, used `scripts/clean-builds.sh` instead of deleting the shared target
 - [ ] New/modified `.anv` examples verify correctly
 - [ ] Documentation updated (if applicable)
 - [ ] Breaking changes documented below

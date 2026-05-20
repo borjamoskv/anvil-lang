@@ -1,16 +1,21 @@
 use colored::Colorize;
-use std::path::PathBuf;
+use std::path::Path;
 use tracing::{error, info_span};
 
 use crate::core::parser;
 
-pub fn cmd_ast(file: &PathBuf) {
+pub fn cmd_ast(file: &Path) {
     let _span = info_span!("cmd_ast", file = %file.display()).entered();
     let source = match std::fs::read_to_string(file) {
         Ok(s) => s,
         Err(e) => {
             error!(file = %file.display(), error = %e, "Cannot read source file");
-            eprintln!("  {} Cannot read {}: {}", "✗".bright_red(), file.display(), e);
+            eprintln!(
+                "  {} Cannot read {}: {}",
+                "✗".bright_red(),
+                file.display(),
+                e
+            );
             std::process::exit(1);
         }
     };

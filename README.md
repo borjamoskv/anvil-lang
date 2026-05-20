@@ -56,6 +56,9 @@ The `where` clause declares invariants that Z3 **must prove** at compile time:
 # Verify a file (parse → typecheck → Z3 prove)
 anvil check examples/transfer.anv
 
+# Emit machine-readable check results for CI/API/frontend integrations
+anvil check --json examples/transfer.anv
+
 # Compile to Rust (only if verified)
 anvil build examples/transfer.anv -o transfer.rs
 
@@ -186,6 +189,10 @@ For commercial proofs and high-performance execution, access the **Proof Market*
 → **[Z3 Installation](docs/z3-installation.md)** — Platform-specific Z3 setup instructions.
 
 → **[SaaS Guide](docs/saas-guide.md)** — Run the Proof Market API with Prometheus metrics.
+
+→ **Local Proof Market demo** — Run `scripts/proof-market-local.sh`, open `http://127.0.0.1:8000/`, paste `.anv`, use mock payment, and inspect the certificate or counterexample.
+
+→ **[`anvil check --json`](docs/saas-guide.md#anvil-check---json-schema-v1)** — Stable schema v1 for CI, API, and frontend integrations.
 
 ## Contributing
 

@@ -1,16 +1,10 @@
-import subprocess
 import json
-import time
 import sys
-import os
-import tempfile
 
-def main():
-    print("🚀 Booting Zero-Dependency Proof Market Verification for AMM Exploit Test...")
-    
-    workspace_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../"))
-    
-    amm_vulnerable_code = """
+from test_proof_market import Oracle, assert_response, post_json
+
+
+AMM_VULNERABLE_CODE = """
 struct AMMPool {
     reserve_x: u64,
     reserve_y: u64
@@ -30,41 +24,34 @@ fn swap(reserve_x: u64, reserve_y: u64, amount_in_x: u64, amount_out_y: u64) -> 
 }
 """
 
-    print("📨 Submitting vulnerable AMM invariant to Z3 Engine...")
-    
-    with tempfile.NamedTemporaryFile(mode="w+", suffix=".anv", delete=False) as temp_file:
-        temp_file.write(amm_vulnerable_code)
-        temp_path = temp_file.name
-        
-    try:
-        process = subprocess.run(
-            ["./target/debug/anvil", "check", temp_path],
-            cwd=workspace_root,
-            capture_output=True,
-            text=True
-        )
-        
-        output = process.stdout + process.stderr
-        
-        print("==================================================")
-        print("ORACLE RESPONSE:")
-        print(output)
-        print("==================================================")
-        
-        if process.returncode != 0 and "VERIFICATION FAILED" in output:
-            print("✅ TEST PASSED: Z3 successfully extracted the AMM vulnerability.")
-            print("🔒 No certificate issued. The protocol is protected.")
-            sys.exit(0)
-        else:
-            print("❌ TEST FAILED: Vulnerability missed or certificate incorrectly issued.")
-            sys.exit(1)
-            
-    except Exception as e:
-        print(f"❌ TEST FAILED: Exception {e}")
+
+def main():
+    print("Booting Proof Market HTTP AMM exploit test...")
+    with Oracle({
+        "ANVIL_CERTIFICATE_SECRET": "ci-proof-market-secret",
+        "ANVIL_ALLOW_MOCK_PAYMENT": "1",
+    }) as oracle:
+        http_status, result = post_json(oracle.base_url, {
+            "client_id": "cortex_client_amm",
+            "payment_mode": "mock",
+            "source_code": AMM_VULNERABLE_CODE,
+        })
+
+    assert_response("AMM counterexample", http_status, result, 200, "VULNERABILITY_DETECTED")
+    if result.get("certificate_hash"):
+        print("FAIL AMM counterexample: certificate_hash should be absent")
+        print(json.dumps(result, indent=2))
         sys.exit(1)
-    finally:
-        if os.path.exists(temp_path):
-            os.remove(temp_path)
+    if "Postcondition #1 violated" not in result.get("z3_output", ""):
+        print("FAIL AMM counterexample: solver output did not include the violated postcondition")
+        print(json.dumps(result, indent=2))
+        sys.exit(1)
+    print("Proof Market denied the vulnerable AMM certificate.")
+
+
+def test_proof_market_amm_counterexample():
+    main()
+
 
 if __name__ == "__main__":
     main()

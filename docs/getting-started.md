@@ -4,7 +4,7 @@ This guide walks you through installing Anvil, verifying your first program, and
 
 ## Prerequisites
 
-- **Rust** ≥ 1.80 ([Install Rust](https://rustup.rs/))
+- **Rust** ≥ 1.85 ([Install Rust](https://rustup.rs/))
 - **Z3 SMT Solver** ≥ 4.8 (see [Z3 Installation Guide](z3-installation.md))
 
 ## Installation
@@ -139,11 +139,41 @@ contract Token {
 | Command | Description |
 |---|---|
 | `anvil check <file>` | Parse, type-check, and verify |
+| `anvil check --json <file>` | Emit schema v1 JSON for automation |
 | `anvil build <file> -o <out>` | Compile to Rust (only if verified) |
 | `anvil build <file> -o <out> -t llvm` | Compile to LLVM IR |
 | `anvil ast <file>` | Dump AST as JSON |
 | `anvil lsp` | Start Language Server Protocol |
 | `anvil saas --port 3000` | Start Proof Market SaaS API |
+
+## JSON Output for Automation
+
+Use `--json` when a script, CI job, API sidecar, or frontend needs stable machine-readable verification results:
+
+```bash
+anvil check --json examples/hello.anv
+```
+
+The output uses schema version `anvil.check.v1`. Read `status` and `ok` first:
+
+| Status | Meaning |
+|---|---|
+| `VERIFIED` | All functions verified; exit code `0` |
+| `REJECTED` | A proof failed or a counterexample was found; exit code `1` |
+| `PARSE_ERROR` | Source could not be parsed; exit code `1` |
+| `TYPE_ERROR` | Source failed type checking; exit code `1` |
+| `IO_ERROR` | The input file could not be read; exit code `1` |
+| `Z3_RESOURCE_EXHAUSTED` | Z3 returned unknown or exhausted resources; exit code `1` |
+
+Recommended fields:
+
+| Consumer | Fields |
+|---|---|
+| CI | `ok`, `status`, `summary.errors_total`, `summary.counterexamples_total`, `duration_ms` |
+| API | `schema_version`, `anvil_version`, `file`, `timeout_ms`, `proof_hash`, `errors`, `warnings` |
+| Frontend | `message`, `results[].fn_name`, `results[].status`, `counterexamples[].lines`, `durations` |
+
+See the [SaaS Guide](saas-guide.md#anvil-check---json-schema-v1) for the full schema shape.
 
 ## Structured Logging
 

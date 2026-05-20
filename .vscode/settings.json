@@ -1,1 +1,76 @@
-{}
+{
+  "files.watcherExclude": {
+    "**/.git/**": true,
+    "**/.cache/**": true,
+    "**/target/**": true,
+    "**/node_modules/**": true,
+    "**/dist/**": true,
+    "**/artifacts/**": true,
+    "**/services/proof-market/target/**": true,
+    "**/human-anomalies/node_modules/**": true,
+    "**/human-anomalies/dist/**": true,
+    "**/editors/vscode/node_modules/**": true,
+    "**/agents-archi-mvp/sdk-ts/node_modules/**": true
+  },
+  "search.exclude": {
+    "**/target": true,
+    "**/node_modules": true,
+    "**/dist": true,
+    "**/artifacts": true,
+    "**/services/proof-market/target": true,
+    "**/human-anomalies/node_modules": true,
+    "**/human-anomalies/dist": true,
+    "**/editors/vscode/node_modules": true,
+    "**/agents-archi-mvp/sdk-ts/node_modules": true
+  },
+  "rust-analyzer.numThreads": 1,
+  "rust-analyzer.cargo.autoreload": false,
+  "rust-analyzer.cargo.buildScripts.enable": false,
+  "rust-analyzer.procMacro.enable": false,
+  "rust-analyzer.lens.enable": false,
+  "rust-analyzer.runnables.extraEnv": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "RUST_TEST_THREADS": "1",
+    "LIBSQLITE3_SYS_USE_PKG_CONFIG": "1",
+    "SQLITE3_LIB_DIR": "/opt/homebrew/opt/sqlite/lib",
+    "SQLITE3_INCLUDE_DIR": "/opt/homebrew/opt/sqlite/include"
+  },
+  "rust-analyzer.files.excludeDirs": [
+    ".git",
+    ".cache",
+    "target",
+    "node_modules",
+    "dist",
+    "artifacts",
+    "services/proof-market/target",
+    "human-anomalies/node_modules",
+    "human-anomalies/dist",
+    "editors/vscode/node_modules",
+    "agents-archi-mvp/sdk-ts/node_modules"
+  ],
+  "rust-analyzer.cargo.allTargets": false,
+  "rust-analyzer.cargo.targetDir": "/Users/borjafernandezangulo/.cache/anvil-lang-target",
+  "rust-analyzer.cargo.extraEnv": {
+    "CARGO_BUILD_JOBS": "1",
+    "CARGO_INCREMENTAL": "0",
+    "CARGO_PROFILE_DEV_DEBUG": "0",
+    "CARGO_PROFILE_TEST_DEBUG": "0",
+    "RUST_TEST_THREADS": "1",
+    "LIBSQLITE3_SYS_USE_PKG_CONFIG": "1",
+    "SQLITE3_LIB_DIR": "/opt/homebrew/opt/sqlite/lib",
+    "SQLITE3_INCLUDE_DIR": "/opt/homebrew/opt/sqlite/include"
+  },
+  "rust-analyzer.checkOnSave": false,
+  "rust-analyzer.checkOnSave.enable": false,
+  "rust-analyzer.check.command": "check",
+  "rust-analyzer.check.allTargets": false,
+  "rust-analyzer.check.extraArgs": [
+    "-j",
+    "1",
+    "--bin",
+    "anvil"
+  ]
+}
