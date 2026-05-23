@@ -99,6 +99,6 @@ Proof:
 99: ## 4. Ledger Seal
 100: - **Timestamp:** 2026-05-21
 101: - **Orchestrator:** CORTEX-MOSKV (v10.0.0-RS)
-102: - **Registry Entry:** Table `reality_verification` (IDs 2, 3, 4, 5)
+102: - **Registry Entry:** Table `reality_verification` (IDs 2, 3, 4, 5, 6)
 103: 
 104: *∴ The Swarm verifies. The Hardware remembers.*
