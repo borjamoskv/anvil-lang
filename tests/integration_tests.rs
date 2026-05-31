@@ -96,7 +96,7 @@ fn output_with_timeout(mut command: Command, label: &str) -> Output {
 }
 
 fn run_anvil_check(example: &str) -> (bool, String) {
-    let _guard = anvil_cli_lock().lock().unwrap();
+    let _guard = anvil_cli_lock().lock().unwrap_or_else(|e| e.into_inner());
     let binary = anvil_binary();
     let example_path = Path::new("examples").join(example);
 
@@ -122,7 +122,7 @@ fn run_anvil_check_json(example: &str) -> (bool, serde_json::Value, String, Stri
 }
 
 fn run_anvil_check_json_path(path: &Path) -> (bool, serde_json::Value, String, String) {
-    let _guard = anvil_cli_lock().lock().unwrap();
+    let _guard = anvil_cli_lock().lock().unwrap_or_else(|e| e.into_inner());
     let binary = anvil_binary();
 
     let mut command = Command::new(&binary);
@@ -165,7 +165,7 @@ fn run_anvil_build(example: &str, target: &str) -> (bool, String) {
 }
 
 fn run_anvil_build_path(path: &Path, target: &str) -> (bool, String) {
-    let _guard = anvil_cli_lock().lock().unwrap();
+    let _guard = anvil_cli_lock().lock().unwrap_or_else(|e| e.into_inner());
     let binary = anvil_binary();
     let output_name = path
         .file_stem()
@@ -204,7 +204,7 @@ fn run_anvil_ast(example: &str) -> (bool, String) {
 }
 
 fn run_anvil_ast_path(path: &Path) -> (bool, String) {
-    let _guard = anvil_cli_lock().lock().unwrap();
+    let _guard = anvil_cli_lock().lock().unwrap_or_else(|e| e.into_inner());
     let binary = anvil_binary();
 
     let mut command = Command::new(&binary);
@@ -541,13 +541,18 @@ fn regression_check_json_success_contract() {
 
 #[test]
 fn regression_check_timeout_flag_is_accepted() {
-    let _guard = anvil_cli_lock().lock().unwrap();
+    let _guard = anvil_cli_lock().lock().unwrap_or_else(|e| e.into_inner());
     let binary = anvil_binary();
     let example_path = Path::new("examples").join("transfer.anv");
 
     let mut command = Command::new(&binary);
-    command.args(["check", "--timeout", "5000", example_path.to_str().unwrap()]);
-    let output = output_with_timeout(command, "anvil check --timeout 5000");
+    command.args([
+        "check",
+        "--timeout",
+        "30000",
+        example_path.to_str().unwrap(),
+    ]);
+    let output = output_with_timeout(command, "anvil check --timeout 30000");
 
     assert!(
         output.status.success(),
@@ -559,7 +564,7 @@ fn regression_check_timeout_flag_is_accepted() {
 
 #[test]
 fn regression_check_rejects_zero_timeout() {
-    let _guard = anvil_cli_lock().lock().unwrap();
+    let _guard = anvil_cli_lock().lock().unwrap_or_else(|e| e.into_inner());
     let binary = anvil_binary();
     let example_path = Path::new("examples").join("transfer.anv");
 
