@@ -499,7 +499,7 @@ fn regression_check_json_success_contract() {
     assert_eq!(json["status"], "VERIFIED");
     assert_eq!(json["ok"], true);
     assert_eq!(json["all_verified"], true);
-    assert_eq!(json["timeout_ms"], 5000);
+    assert_eq!(json["timeout_ms"], 30000);
     assert!(
         json["duration_ms"].is_number(),
         "missing duration: {}",
