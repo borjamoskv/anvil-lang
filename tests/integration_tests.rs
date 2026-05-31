@@ -101,7 +101,12 @@ fn run_anvil_check(example: &str) -> (bool, String) {
     let example_path = Path::new("examples").join(example);
 
     let mut command = Command::new(&binary);
-    command.args(["check", "--timeout", "30000", example_path.to_str().unwrap()]);
+    command.args([
+        "check",
+        "--timeout",
+        "30000",
+        example_path.to_str().unwrap(),
+    ]);
     let output = output_with_timeout(command, "anvil check");
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -121,7 +126,13 @@ fn run_anvil_check_json_path(path: &Path) -> (bool, serde_json::Value, String, S
     let binary = anvil_binary();
 
     let mut command = Command::new(&binary);
-    command.args(["check", "--timeout", "30000", "--json", path.to_str().unwrap()]);
+    command.args([
+        "check",
+        "--timeout",
+        "30000",
+        "--json",
+        path.to_str().unwrap(),
+    ]);
     let output = output_with_timeout(command, "anvil check --json");
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
