@@ -84,8 +84,8 @@ impl MempoolAwareZ3 {
     /// Modela el reordenamiento de transacciones (Time-Bandit attacks) como variable Z3.
     pub fn inject_mempool_topology<'ctx>(solver: &z3::Solver<'ctx>, ctx: &'ctx z3::Context) {
         info!("Singularity [4/4]: Inyectando topología Mempool en Z3 Solver.");
-        let tx_order = z3::ast::BV::new_const(ctx, "mempool_tx_order", 64);
-        let zero = z3::ast::BV::from_u64(ctx, 0, 64);
+        let tx_order = z3::ast::BV::new_const(ctx, "mempool_tx_order", 256);
+        let zero = z3::ast::BV::from_u64(ctx, 0, 256);
         solver.assert(&tx_order.bvuge(&zero));
     }
 }

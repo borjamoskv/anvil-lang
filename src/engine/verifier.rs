@@ -143,6 +143,33 @@ fn verify_function(
 ) -> VerifyResult {
     let _span = info_span!("verify_function", fn_name = %func.name).entered();
     let start = Instant::now();
+
+    // Extract raw preconditions first to find known constants
+    let preconditions_raw: Vec<&Invariant> = func.invariants.iter().filter(|inv| !invariant_uses_post(&inv.expr)).collect();
+    let constants = collect_known_constants(&preconditions_raw);
+
+    // Simplify the function AST
+    let mut simplified_func = func.clone();
+    simplified_func.invariants = simplified_func.invariants.into_iter().map(|inv| Invariant {
+        expr: simplify_invariant_expr(&inv.expr, &constants),
+        span: inv.span,
+    }).collect();
+    simplified_func.assumes = simplified_func.assumes.into_iter().map(|inv| Invariant {
+        expr: simplify_invariant_expr(&inv.expr, &constants),
+        span: inv.span,
+    }).collect();
+    simplified_func.body = simplify_block(&simplified_func.body, &constants);
+
+    // Simplify contract invariants
+    let simplified_contract_invariants: Vec<Invariant> = contract_invariants.iter().map(|inv| Invariant {
+        expr: simplify_invariant_expr(&inv.expr, &constants),
+        span: inv.span.clone(),
+    }).collect();
+
+    // Shadow func and contract_invariants so the rest of the function operates on the simplified AST
+    let func = &simplified_func;
+    let contract_invariants = &simplified_contract_invariants;
+
     let mut cfg = Config::new();
     cfg.set_timeout_msec(options.timeout_ms);
     let ctx = Context::new(&cfg);
@@ -2196,3 +2223,491 @@ pub fn print_results(results: &[VerifyResult]) {
     }
     println!();
 }
+
+// ============================================================
+// ALGEBRAIC SIMPLIFICATION & CONSTANT PROPAGATION ENGINE
+// ============================================================
+
+fn collect_known_constants(preconditions: &[&Invariant]) -> HashMap<String, i128> {
+    let mut constants = HashMap::new();
+    for pre in preconditions {
+        if let InvariantExpr::Comparison { left, op: CmpOp::Eq, right } = &pre.expr {
+            match (left.as_ref(), right.as_ref()) {
+                (InvTerm::Var { name, is_post: false }, right_term) => {
+                    if let Some(val) = get_literal_val(right_term) {
+                        constants.insert(name.clone(), val);
+                    }
+                }
+                (left_term, InvTerm::Var { name, is_post: false }) => {
+                    if let Some(val) = get_literal_val(left_term) {
+                        constants.insert(name.clone(), val);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    constants
+}
+
+fn get_literal_val(term: &InvTerm) -> Option<i128> {
+    match term {
+        InvTerm::Literal(val) => Some(*val),
+        InvTerm::BigLiteral(s) => s.parse::<i128>().ok(),
+        _ => None,
+    }
+}
+
+fn get_expr_literal_val(expr: &Expr) -> Option<i128> {
+    match expr {
+        Expr::IntLit(val) => Some(*val),
+        Expr::BigIntLit(s) => s.parse::<i128>().ok(),
+        _ => None,
+    }
+}
+
+fn gcd(mut a: i128, mut b: i128) -> i128 {
+    while b != 0 {
+        let temp = b;
+        b = a % b;
+        a = temp;
+    }
+    a.abs()
+}
+
+fn is_power_of_two(n: i128) -> Option<u32> {
+    if n <= 0 {
+        return None;
+    }
+    if (n & (n - 1)) == 0 {
+        Some(n.trailing_zeros())
+    } else {
+        None
+    }
+}
+
+fn simplify_inv_term(term: &InvTerm, constants: &HashMap<String, i128>, in_arith_op: bool) -> InvTerm {
+    match term {
+        InvTerm::Var { name, is_post } => {
+            if !*is_post && in_arith_op {
+                if let Some(&val) = constants.get(name) {
+                    return InvTerm::Literal(val);
+                }
+            }
+            term.clone()
+        }
+        InvTerm::BinOp { left, op, right } => {
+            let left_sim = simplify_inv_term(left, constants, true);
+            let right_sim = simplify_inv_term(right, constants, true);
+
+            // Algebraic simplification for (X * a) / b
+            if *op == ArithOp::Div {
+                if let Some(b) = get_literal_val(&right_sim) {
+                    if b != 0 {
+                        // Check if left is (X * a) or (a * X)
+                        if let InvTerm::BinOp { left: ref xl, op: ArithOp::Mul, right: ref xr } = left_sim {
+                            match (xl.as_ref(), xr.as_ref()) {
+                                (x, r_term) => {
+                                    if let Some(a) = get_literal_val(r_term) {
+                                        let g = gcd(a, b);
+                                        let a_prime = a / g;
+                                        let b_prime = b / g;
+                                        if a_prime == 1 {
+                                            if let Some(k) = is_power_of_two(b_prime) {
+                                                return InvTerm::BinOp {
+                                                    left: Box::new(x.clone()),
+                                                    op: ArithOp::Shr,
+                                                    right: Box::new(InvTerm::Literal(k as i128)),
+                                                };
+                                            } else {
+                                                return InvTerm::BinOp {
+                                                    left: Box::new(x.clone()),
+                                                    op: ArithOp::Div,
+                                                    right: Box::new(InvTerm::Literal(b_prime)),
+                                                };
+                                            }
+                                        } else {
+                                            let new_left = InvTerm::BinOp {
+                                                left: Box::new(x.clone()),
+                                                op: ArithOp::Mul,
+                                                right: Box::new(InvTerm::Literal(a_prime)),
+                                            };
+                                            return InvTerm::BinOp {
+                                                left: Box::new(new_left),
+                                                op: ArithOp::Div,
+                                                right: Box::new(InvTerm::Literal(b_prime)),
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let InvTerm::BinOp { left: ref xl, op: ArithOp::Mul, right: ref xr } = left_sim {
+                            match (xl.as_ref(), xr.as_ref()) {
+                                (l_term, x) => {
+                                    if let Some(a) = get_literal_val(l_term) {
+                                        let g = gcd(a, b);
+                                        let a_prime = a / g;
+                                        let b_prime = b / g;
+                                        if a_prime == 1 {
+                                            if let Some(k) = is_power_of_two(b_prime) {
+                                                return InvTerm::BinOp {
+                                                    left: Box::new(x.clone()),
+                                                    op: ArithOp::Shr,
+                                                    right: Box::new(InvTerm::Literal(k as i128)),
+                                                };
+                                            } else {
+                                                return InvTerm::BinOp {
+                                                    left: Box::new(x.clone()),
+                                                    op: ArithOp::Div,
+                                                    right: Box::new(InvTerm::Literal(b_prime)),
+                                                };
+                                            }
+                                        } else {
+                                            let new_left = InvTerm::BinOp {
+                                                left: Box::new(InvTerm::Literal(a_prime)),
+                                                op: ArithOp::Mul,
+                                                right: Box::new(x.clone()),
+                                            };
+                                            return InvTerm::BinOp {
+                                                left: Box::new(new_left),
+                                                op: ArithOp::Div,
+                                                right: Box::new(InvTerm::Literal(b_prime)),
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Divisor is a power of two: X / b -> X >> k
+                        if let Some(k) = is_power_of_two(b) {
+                            return InvTerm::BinOp {
+                                left: Box::new(left_sim),
+                                op: ArithOp::Shr,
+                                  right: Box::new(InvTerm::Literal(k as i128)),
+                            };
+                        }
+                    }
+                }
+            }
+
+            // Constant folding
+            if let (Some(a), Some(b)) = (get_literal_val(&left_sim), get_literal_val(&right_sim)) {
+                let folded = match op {
+                    ArithOp::Add => Some(a.wrapping_add(b)),
+                    ArithOp::Sub => Some(a.wrapping_sub(b)),
+                    ArithOp::Mul => Some(a.wrapping_mul(b)),
+                    ArithOp::Div => if b != 0 { Some(a.wrapping_div(b)) } else { None },
+                    ArithOp::Mod => if b != 0 { Some(a.wrapping_rem(b)) } else { None },
+                    ArithOp::BitAnd => Some(a & b),
+                    ArithOp::BitOr => Some(a | b),
+                    ArithOp::BitXor => Some(a ^ b),
+                    ArithOp::Shl => Some(a.wrapping_shl(b as u32)),
+                    ArithOp::Shr => Some(a.wrapping_shr(b as u32)),
+                };
+                if let Some(val) = folded {
+                    return InvTerm::Literal(val);
+                }
+            }
+
+            InvTerm::BinOp {
+                left: Box::new(left_sim),
+                op: op.clone(),
+                right: Box::new(right_sim),
+            }
+        }
+        InvTerm::FnCall { name, args } => {
+            let args_sim = args.iter().map(|arg| simplify_inv_term(arg, constants, false)).collect();
+            InvTerm::FnCall { name: name.clone(), args: args_sim }
+        }
+        _ => term.clone(),
+    }
+}
+
+fn simplify_invariant_expr(expr: &InvariantExpr, constants: &HashMap<String, i128>) -> InvariantExpr {
+    match expr {
+        InvariantExpr::Comparison { left, op, right } => InvariantExpr::Comparison {
+            left: Box::new(simplify_inv_term(left, constants, false)),
+            op: op.clone(),
+            right: Box::new(simplify_inv_term(right, constants, false)),
+        },
+        InvariantExpr::And(a, b) => InvariantExpr::And(
+            Box::new(simplify_invariant_expr(a, constants)),
+            Box::new(simplify_invariant_expr(b, constants)),
+        ),
+        InvariantExpr::Or(a, b) => InvariantExpr::Or(
+            Box::new(simplify_invariant_expr(a, constants)),
+            Box::new(simplify_invariant_expr(b, constants)),
+        ),
+        InvariantExpr::Not(a) => InvariantExpr::Not(Box::new(simplify_invariant_expr(a, constants))),
+        InvariantExpr::Forall { var, domain, body } => InvariantExpr::Forall {
+            var: var.clone(),
+            domain: Box::new(simplify_inv_term(domain, constants, false)),
+            body: Box::new(simplify_invariant_expr(body, constants)),
+        },
+        InvariantExpr::Exists { var, domain, body } => InvariantExpr::Exists {
+            var: var.clone(),
+            domain: Box::new(simplify_inv_term(domain, constants, false)),
+            body: Box::new(simplify_invariant_expr(body, constants)),
+        },
+        InvariantExpr::True => InvariantExpr::True,
+    }
+}
+
+fn simplify_expr(expr: &Expr, constants: &HashMap<String, i128>, in_arith_op: bool) -> Expr {
+    match expr {
+        Expr::Ident(name) => {
+            if in_arith_op {
+                if let Some(&val) = constants.get(name) {
+                    return Expr::IntLit(val);
+                }
+            }
+            expr.clone()
+        }
+        Expr::BinOp { left, op, right } => {
+            let is_arith = match op {
+                BinOp::Add
+                | BinOp::Sub
+                | BinOp::Mul
+                | BinOp::Div
+                | BinOp::Mod
+                | BinOp::BitAnd
+                | BinOp::BitOr
+                | BinOp::BitXor
+                | BinOp::Shl
+                | BinOp::Shr => true,
+                _ => false,
+            };
+            let left_sim = simplify_expr(left, constants, is_arith);
+            let right_sim = simplify_expr(right, constants, is_arith);
+
+            // Algebraic simplification for (X * a) / b
+            if *op == BinOp::Div {
+                if let Some(b) = get_expr_literal_val(&right_sim) {
+                    if b != 0 {
+                        if let Expr::BinOp { left: ref xl, op: BinOp::Mul, right: ref xr } = left_sim {
+                            match (xl.as_ref(), xr.as_ref()) {
+                                (x, r_term) => {
+                                    if let Some(a) = get_expr_literal_val(r_term) {
+                                        let g = gcd(a, b);
+                                        let a_prime = a / g;
+                                        let b_prime = b / g;
+                                        if a_prime == 1 {
+                                            if let Some(k) = is_power_of_two(b_prime) {
+                                                return Expr::BinOp {
+                                                    left: Box::new(x.clone()),
+                                                    op: BinOp::Shr,
+                                                    right: Box::new(Expr::IntLit(k as i128)),
+                                                };
+                                            } else {
+                                                return Expr::BinOp {
+                                                    left: Box::new(x.clone()),
+                                                    op: BinOp::Div,
+                                                    right: Box::new(Expr::IntLit(b_prime)),
+                                                };
+                                            }
+                                        } else {
+                                            let new_left = Expr::BinOp {
+                                                left: Box::new(x.clone()),
+                                                op: BinOp::Mul,
+                                                right: Box::new(Expr::IntLit(a_prime)),
+                                            };
+                                            return Expr::BinOp {
+                                                left: Box::new(new_left),
+                                                op: BinOp::Div,
+                                                right: Box::new(Expr::IntLit(b_prime)),
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if let Expr::BinOp { left: ref xl, op: BinOp::Mul, right: ref xr } = left_sim {
+                            match (xl.as_ref(), xr.as_ref()) {
+                                (l_term, x) => {
+                                    if let Some(a) = get_expr_literal_val(l_term) {
+                                        let g = gcd(a, b);
+                                        let a_prime = a / g;
+                                        let b_prime = b / g;
+                                        if a_prime == 1 {
+                                            if let Some(k) = is_power_of_two(b_prime) {
+                                                return Expr::BinOp {
+                                                    left: Box::new(x.clone()),
+                                                    op: BinOp::Shr,
+                                                    right: Box::new(Expr::IntLit(k as i128)),
+                                                };
+                                            } else {
+                                                return Expr::BinOp {
+                                                    left: Box::new(x.clone()),
+                                                    op: BinOp::Div,
+                                                    right: Box::new(Expr::IntLit(b_prime)),
+                                                };
+                                            }
+                                        } else {
+                                            let new_left = Expr::BinOp {
+                                                left: Box::new(Expr::IntLit(a_prime)),
+                                                op: BinOp::Mul,
+                                                right: Box::new(x.clone()),
+                                            };
+                                            return Expr::BinOp {
+                                                left: Box::new(new_left),
+                                                op: BinOp::Div,
+                                                right: Box::new(Expr::IntLit(b_prime)),
+                                            };
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if let Some(k) = is_power_of_two(b) {
+                            return Expr::BinOp {
+                                left: Box::new(left_sim),
+                                op: BinOp::Shr,
+                                right: Box::new(Expr::IntLit(k as i128)),
+                            };
+                        }
+                    }
+                }
+            }
+
+            // Constant folding
+            if let (Some(a), Some(b)) = (get_expr_literal_val(&left_sim), get_expr_literal_val(&right_sim)) {
+                let folded = match op {
+                    BinOp::Add => Some(a.wrapping_add(b)),
+                    BinOp::Sub => Some(a.wrapping_sub(b)),
+                    BinOp::Mul => Some(a.wrapping_mul(b)),
+                    BinOp::Div => if b != 0 { Some(a.wrapping_div(b)) } else { None },
+                    BinOp::Mod => if b != 0 { Some(a.wrapping_rem(b)) } else { None },
+                    BinOp::BitAnd => Some(a & b),
+                    BinOp::BitOr => Some(a | b),
+                    BinOp::BitXor => Some(a ^ b),
+                    BinOp::Shl => Some(a.wrapping_shl(b as u32)),
+                    BinOp::Shr => Some(a.wrapping_shr(b as u32)),
+                    _ => None,
+                };
+                if let Some(val) = folded {
+                    return Expr::IntLit(val);
+                }
+            }
+
+            Expr::BinOp {
+                left: Box::new(left_sim),
+                op: op.clone(),
+                right: Box::new(right_sim),
+            }
+        }
+        Expr::UnaryOp { op, operand } => {
+            let is_arith = *op == UnaryOp::Neg;
+            let operand_sim = simplify_expr(operand, constants, is_arith);
+            if let Some(val) = get_expr_literal_val(&operand_sim) {
+                let folded = match op {
+                    UnaryOp::Neg => Some(val.wrapping_neg()),
+                    UnaryOp::Not => Some(if val == 0 { 1 } else { 0 }),
+                };
+                if let Some(v) = folded {
+                    return Expr::IntLit(v);
+                }
+            }
+            Expr::UnaryOp { op: op.clone(), operand: Box::new(operand_sim) }
+        }
+        Expr::FnCall { name, args } => {
+            let args_sim = args.iter().map(|arg| simplify_expr(arg, constants, false)).collect();
+            Expr::FnCall { name: name.clone(), args: args_sim }
+        }
+        Expr::MethodCall { object, method, args } => Expr::MethodCall {
+            object: Box::new(simplify_expr(object, constants, false)),
+            method: method.clone(),
+            args: args.iter().map(|e| simplify_expr(e, constants, false)).collect(),
+        },
+        Expr::FieldAccess { object, field } => Expr::FieldAccess {
+            object: Box::new(simplify_expr(object, constants, false)),
+            field: field.clone(),
+        },
+        Expr::Index { object, index } => Expr::Index {
+            object: Box::new(simplify_expr(object, constants, false)),
+            index: Box::new(simplify_expr(index, constants, false)),
+        },
+        Expr::If { condition, then_block, else_block } => {
+            let cond_sim = simplify_expr(condition, constants, false);
+            let then_sim = simplify_block(then_block, constants);
+            let else_sim = else_block.as_ref().map(|b| simplify_block(b, constants));
+            Expr::If {
+                condition: Box::new(cond_sim),
+                then_block: then_sim,
+                else_block: else_sim,
+            }
+        }
+        Expr::Block(block) => Expr::Block(simplify_block(block, constants)),
+        _ => expr.clone(),
+    }
+}
+
+fn simplify_block(block: &Block, constants: &HashMap<String, i128>) -> Block {
+    let stmts_sim = block.stmts.iter().map(|stmt| simplify_stmt(stmt, constants)).collect();
+    let expr_sim = block.expr.as_ref().map(|e| Box::new(simplify_expr(e, constants, false)));
+    Block { stmts: stmts_sim, expr: expr_sim }
+}
+
+fn simplify_lvalue(lval: &LValue, constants: &HashMap<String, i128>) -> LValue {
+    match lval {
+        LValue::Ident(name) => LValue::Ident(name.clone()),
+        LValue::FieldAccess { object, field } => LValue::FieldAccess {
+            object: object.clone(),
+            field: field.clone(),
+        },
+        LValue::Index { object, index } => LValue::Index {
+            object: object.clone(),
+            index: Box::new(simplify_expr(index, constants, false)),
+        },
+    }
+}
+
+fn simplify_stmt(stmt: &Stmt, constants: &HashMap<String, i128>) -> Stmt {
+    match stmt {
+        Stmt::Let { name, ty, is_mut, value } => Stmt::Let {
+            name: name.clone(),
+            ty: ty.clone(),
+            is_mut: *is_mut,
+            value: simplify_expr(value, constants, false),
+        },
+        Stmt::Assign { target, op, value } => Stmt::Assign {
+            target: simplify_lvalue(target, constants),
+            op: op.clone(),
+            value: simplify_expr(value, constants, false),
+        },
+        Stmt::If { condition, then_block, else_block } => Stmt::If {
+            condition: simplify_expr(condition, constants, false),
+            then_block: simplify_block(then_block, constants),
+            else_block: else_block.as_ref().map(|b| simplify_block(b, constants)),
+        },
+        Stmt::While { condition, invariants, body } => {
+            let invs_sim = invariants.iter().map(|inv| Invariant {
+                expr: simplify_invariant_expr(&inv.expr, constants),
+                span: inv.span.clone(),
+            }).collect();
+            Stmt::While {
+                condition: simplify_expr(condition, constants, false),
+                invariants: invs_sim,
+                body: simplify_block(body, constants),
+            }
+        }
+        Stmt::Return(expr) => Stmt::Return(expr.as_ref().map(|e| simplify_expr(e, constants, false))),
+        Stmt::Assert { condition, message } => Stmt::Assert {
+            condition: simplify_expr(condition, constants, false),
+            message: message.clone(),
+        },
+        Stmt::Emit { event, args } => Stmt::Emit {
+            event: event.clone(),
+            args: args.iter().map(|e| simplify_expr(e, constants, false)).collect(),
+        },
+        Stmt::Ghost { name, ty, value } => Stmt::Ghost {
+            name: name.clone(),
+            ty: ty.clone(),
+            value: simplify_expr(value, constants, false),
+        },
+        Stmt::Expr(expr) => Stmt::Expr(simplify_expr(expr, constants, false)),
+    }
+}
+
