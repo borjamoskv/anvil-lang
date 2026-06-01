@@ -13,8 +13,9 @@
             --bg-2: #111111;
             --bg-3: #161616;
             --text: #E8E8E8;
-            --text-muted: #666;
+            --text-muted: #8A8A8A;
             --accent: #2B3BE5;
+            --accent-light: #808EFF;
             --accent-dim: rgba(43,59,229,0.15);
             --green: #00FF88;
             --red: #FF3355;
@@ -54,7 +55,7 @@
             letter-spacing: -0.5px;
             color: #fff;
         }
-        .logo span { color: var(--accent); }
+        .logo span { color: var(--accent-light); }
 
         .nav-badge {
             font-family: var(--mono);
@@ -90,7 +91,7 @@
         .hero-label {
             font-family: var(--mono);
             font-size: 0.72rem;
-            color: var(--accent);
+            color: var(--accent-light);
             letter-spacing: 3px;
             text-transform: uppercase;
             margin-bottom: 1.5rem;
@@ -107,7 +108,7 @@
 
         .hero h1 em {
             font-style: normal;
-            color: var(--accent);
+            color: var(--accent-light);
         }
 
         .hero p {
@@ -266,7 +267,7 @@
 
         .result-verified { color: var(--green); }
         .result-rejected { color: var(--red); }
-        .result-hash { color: var(--accent); }
+        .result-hash { color: var(--accent-light); }
         .result-muted { color: var(--text-muted); }
 
         /* ── SIDEBAR ── */
@@ -282,12 +283,12 @@
             padding: 1.25rem;
         }
 
-        .info-card h3 {
+        .info-card h2 {
             font-family: var(--mono);
             font-size: 0.72rem;
             letter-spacing: 2px;
             text-transform: uppercase;
-            color: var(--accent);
+            color: var(--accent-light);
             margin-bottom: 1rem;
         }
 
@@ -322,8 +323,8 @@
             transition: all 0.15s;
         }
         .ex-btn:hover {
-            border-color: var(--accent);
-            color: var(--accent);
+            border-color: var(--accent-light);
+            color: var(--accent-light);
             background: var(--accent-dim);
         }
 
@@ -350,7 +351,7 @@
             align-items: center;
             justify-content: center;
             font-size: 0.65rem;
-            color: var(--accent);
+            color: var(--accent-light);
             flex-shrink: 0;
         }
 
@@ -381,7 +382,7 @@
             text-decoration: none;
             transition: color 0.15s;
         }
-        .footer-links a:hover { color: var(--accent); }
+        .footer-links a:hover { color: var(--accent-light); }
 
         /* ── LOADING ── */
         .spinner {
@@ -447,7 +448,7 @@
                     <div class="dot"></div>
                 </div>
             </div>
-            <textarea id="code" spellcheck="false">fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64
+            <textarea id="code" spellcheck="false" aria-label="Anvil Source Code (.anv)">fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64
     where {
         amount > 0,
         sender_balance >= amount,
@@ -483,11 +484,11 @@
     <div class="sidebar">
         <!-- AUTHORIZATION CARD -->
         <div class="info-card" id="auth-card">
-            <h3>Authorization</h3>
+            <h2>Authorization</h2>
             <p style="margin-bottom: 1rem; font-size: 0.75rem;">Every verification request requires an active key.</p>
             <div style="display: flex; flex-direction: column; gap: 0.75rem;">
-                <input type="password" id="exergy-key" placeholder="x-exergy-key" 
-                    style="background: var(--bg-3); border: 1px solid var(--border); color: var(--accent); padding: 0.6rem; font-family: var(--mono); font-size: 0.75rem; width: 100%; outline: none;">
+                <input type="password" id="exergy-key" placeholder="x-exergy-key" aria-label="Exergy Key"
+                    style="background: var(--bg-3); border: 1px solid var(--border); color: var(--accent-light); padding: 0.6rem; font-family: var(--mono); font-size: 0.75rem; width: 100%; outline: none;">
                 <div style="display: flex; gap: 0.5rem;">
                     <button class="ex-btn" style="flex: 1; text-align: center;" onclick="validateCurrentKey()">Validate</button>
                     <a href="https://agents.archi" target="_blank" class="ex-btn" style="flex: 1; text-align: center; text-decoration: none;">Get Key</a>
@@ -497,7 +498,7 @@
         </div>
 
         <div class="info-card">
-            <h3>Pipeline</h3>
+            <h2>Pipeline</h2>
             <div class="pipeline">
                 <div class="pipe-step"><div class="pipe-num">1</div>PEG Parser → Typed AST</div>
                 <div class="pipe-step"><div class="pipe-num">2</div>Bidirectional Type Check</div>
@@ -508,7 +509,7 @@
         </div>
 
         <div class="info-card">
-            <h3>Examples</h3>
+            <h2>Examples</h2>
             <ul class="examples-list">
                 <li><button class="ex-btn" onclick="loadExample('transfer')">transfer.anv — Token conservation</button></li>
                 <li><button class="ex-btn" onclick="loadExample('k2')">k2_bypass.anv — Close factor attack</button></li>
@@ -518,16 +519,16 @@
         </div>
 
         <div class="info-card">
-            <h3>API</h3>
-            <p style="margin-bottom: 0.75rem;">POST <code style="color: var(--accent);">/v1/verify</code></p>
+            <h2>API</h2>
+            <p style="margin-bottom: 0.75rem;">POST <code style="color: var(--accent-light);">/v1/verify</code></p>
             <p>Body: <code style="color: var(--green);">{ "source_code": "..." }</code></p>
             <p style="margin-top: 0.75rem;">Returns: status, message, certificate_hash, timestamp.</p>
         </div>
 
         <div class="info-card">
-            <h3>Observability</h3>
-                <p>Prometheus metrics at <a href="/metrics" style="color: var(--accent);">/metrics</a> require an active key.</p>
-            <p style="margin-top: 0.5rem;">Health check at <a href="/health" style="color: var(--accent);">/health</a></p>
+            <h2>Observability</h2>
+                <p>Prometheus metrics at <a href="/metrics" style="color: var(--accent-light);">/metrics</a> require an active key.</p>
+            <p style="margin-top: 0.5rem;">Health check at <a href="/health" style="color: var(--accent-light);">/health</a></p>
         </div>
     </div>
 </main>
