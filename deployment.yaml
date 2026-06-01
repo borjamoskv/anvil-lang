@@ -1,0 +1,26 @@
+environments:
+  dev:
+    project: forward-tape-489302-m7
+    region: us
+    resources:
+      - type: bigquery.dataset
+        name: cortex_leads_b2b
+        definition:
+          labels:
+            env: dev
+            datacloud: antigravity
+      - type: bigquerydatatransfer.transferConfig
+        name: gcs_apollo_leads_ingestion
+        metadata:
+          serviceAccountName: "448929549146-compute@developer.gserviceaccount.com"
+        definition:
+          displayName: "GCS Apollo Leads Ingestion"
+          dataSourceId: google_cloud_storage
+          schedule: "every 24 hours"
+          destinationDatasetId: cortex_leads_b2b
+          params:
+            data_path_template: "gs://forward-tape-489302-m7-leads/leads/*.json"
+            destination_table_name_template: "verified_leads"
+            file_format: "JSON"
+            write_disposition: "APPEND"
+            ignore_unknown_values: "true"
