@@ -48,6 +48,10 @@ pub async fn start_server(port: u16) {
         .await
         .expect("Failed to connect to database");
 
+    crate::evidence::store::initialize_ledger_table(&pool)
+        .await
+        .expect("Failed to initialize traceability ledger table");
+
     // Initialize Prometheus metrics exporter on the same server
     let builder = metrics_exporter_prometheus::PrometheusBuilder::new();
     let handle = builder
@@ -64,6 +68,7 @@ pub async fn start_server(port: u16) {
         .route("/health", get(health_check))
         .route("/v1/verify", post(verify_contract))
         .route("/v1/auth/validate", post(validate_key))
+        .route("/api/provenance/:metric_id", get(crate::evidence::api::get_provenance))
         .route("/metrics", get(metrics_handler))
         .with_state(state);
 
