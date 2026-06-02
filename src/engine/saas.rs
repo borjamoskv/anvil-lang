@@ -52,6 +52,8 @@ pub async fn start_server(port: u16) {
         .await
         .expect("Failed to initialize traceability ledger table");
 
+    crate::evidence::instrumentation::start_instrumentation_loop(pool.clone());
+
     // Initialize Prometheus metrics exporter on the same server
     let builder = metrics_exporter_prometheus::PrometheusBuilder::new();
     let handle = builder

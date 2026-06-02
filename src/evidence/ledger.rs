@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LedgerEvent {
     pub event_id: String,
+    pub metric_id: String,
+    pub metric_value: f64,
     pub parent_event_id: Option<String>,
     pub source_type: String,
     pub source_hash: String,

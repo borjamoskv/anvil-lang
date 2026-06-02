@@ -25,8 +25,8 @@ pub async fn get_provenance(
     // we return a deterministic value matching the hash or just pass dummy values for observations 
     // since the ledger schema doesn't yet store deep observation counts.
     let response = MetricProvenanceResponse {
-        metric_id: event.event_id,
-        value: 0.4333, // In a real system, this comes from a dedicated metrics view joined with ledger
+        metric_id: event.metric_id,
+        value: event.metric_value, 
         provenance: ProvenanceInfo {
             level: "C5_REAL".to_string(),
             source: ProvenanceSource {
