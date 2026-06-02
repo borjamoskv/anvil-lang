@@ -1,9 +1,36 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { fetchLedgerProvenance, type MetricProvenanceResponse } from '../lib/LedgerClient';
 
 export default function TrampaFiscal() {
+  const [metric, setMetric] = useState<MetricProvenanceResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchLedgerProvenance('TAX_ARBITRAGE_01')
+      .then(setMetric)
+      .catch(err => {
+        console.error(err);
+        setError(err.message);
+      });
+  }, []);
+
+  if (error) {
+    return (
+      <div className="bg-red-900 border border-red-500 rounded-lg p-6 text-red-200 font-mono text-xs overflow-x-auto">
+        <div className="font-bold text-white mb-2">🚨 EPISTEMIC FAILURE (TAX ARBITRAGE)</div>
+        {error}
+      </div>
+    );
+  }
+
   return (
-    <div className="overflow-x-auto border border-white/10 rounded-lg bg-black/40 backdrop-blur-sm">
-      <table className="w-full text-left border-collapse text-sm font-mono">
+    <div className="overflow-x-auto border border-white/10 rounded-lg bg-black/40 backdrop-blur-sm relative">
+      <div className="absolute top-2 right-2 z-20">
+        <span className="text-[#2B3BE5] font-bold px-2 bg-[#2B3BE5]/10 border border-[#2B3BE5]/30 rounded text-[10px] font-mono">
+          [ {metric?.provenance.level || 'VERIFYING...'} ]
+        </span>
+      </div>
+      <table className="w-full text-left border-collapse text-sm font-mono mt-4">
         <thead>
           <tr className="border-b border-white/10 bg-white/5 text-[#2B3BE5]">
             <th className="p-4 font-normal tracking-widest whitespace-nowrap">ESTRUCTURA</th>

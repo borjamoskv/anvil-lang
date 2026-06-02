@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { fetchLedgerProvenance, MetricProvenanceResponse } from '../lib/LedgerClient';
+import { fetchLedgerProvenance, type MetricProvenanceResponse } from '../lib/LedgerClient';
 
 export default function TelemetryWidget() {
   const [uptime, setUptime] = useState(0);

@@ -1,6 +1,19 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { fetchLedgerProvenance, type MetricProvenanceResponse } from '../lib/LedgerClient';
 
 export default function EcosistemaCreadores() {
+  const [metric, setMetric] = useState<MetricProvenanceResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchLedgerProvenance('SYBIL_GRAPH_01')
+      .then(setMetric)
+      .catch(err => {
+        console.error(err);
+        setError(err.message);
+      });
+  }, []);
+
   const nodes = [
     { id: 'Core-A', label: 'Domínguez', x: 50, y: 50, size: 24 },
     { id: 'Core-B', label: 'Bosch', x: 30, y: 70, size: 20 },
@@ -13,11 +26,28 @@ export default function EcosistemaCreadores() {
     { id: 'Sat-5', label: 'Satélite 5', x: 85, y: 80, size: 8 },
   ];
 
+  if (error) {
+    return (
+      <div className="w-full h-80 bg-red-900 border border-red-500 rounded-lg flex items-center justify-center p-6 text-red-200 font-mono text-xs">
+        <div>
+          <div className="font-bold text-white mb-2">🚨 EPISTEMIC FAILURE (COLLUSIVE GRAPH)</div>
+          {error}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="relative w-full h-80 bg-[#0A0A0A] border border-white/10 rounded-lg overflow-hidden group">
       {/* Background Grid */}
       <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)', backgroundSize: '20px 20px' }}></div>
       
+      <div className="absolute top-4 right-4 z-20 pointer-events-none">
+        <span className="text-[#2B3BE5] font-bold px-2 bg-[#2B3BE5]/10 border border-[#2B3BE5]/30 rounded text-[10px] font-mono">
+          [ {metric?.provenance.level || 'VERIFYING...'} ]
+        </span>
+      </div>
+
       <div className="absolute top-4 left-4 z-20 pointer-events-none">
         <div className="text-[#2B3BE5] font-mono text-xs tracking-widest uppercase font-bold bg-black/50 p-1">Grafo Colusivo</div>
         <div className="text-white/40 font-mono text-[10px] bg-black/50 p-1">Tasa de endogamia: 84.2%</div>

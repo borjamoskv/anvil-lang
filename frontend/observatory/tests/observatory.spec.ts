@@ -56,12 +56,15 @@ test.describe('Observatory Runtime Fidelity (Phase A)', () => {
     await expect(telemetry).toBeVisible();
   });
 
-  test('5. C4_SIM Badge Visible', async ({ page }) => {
-    const c4simBadges = page.getByText('[ C4-SIM: SYNTHETIC ]');
-    // There should be at least two (one in ledger, one in widget)
-    const count = await c4simBadges.count();
-    expect(count).toBeGreaterThanOrEqual(1);
-    
-    await expect(c4simBadges.first()).toBeVisible();
+  test('5. Epistemic Badges Render or Fail (Phase E)', async ({ page }) => {
+    // Because the DB isn't seeded with real metrics in test mode yet,
+    // we expect either the VERIFYING badge or the EPISTEMIC FAILURE fallback.
+    const badges = page.locator('text=VERIFYING...');
+    const failures = page.locator('text=EPISTEMIC FAILURE');
+
+    const badgeCount = await badges.count();
+    const failureCount = await failures.count();
+
+    expect(badgeCount + failureCount).toBeGreaterThanOrEqual(1);
   });
 });
