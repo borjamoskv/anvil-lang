@@ -23,9 +23,9 @@ const MAX_SOURCE_BYTES: usize = 50 * 1024;
 const MAX_JSON_BODY_BYTES: usize = MAX_SOURCE_BYTES * 6 + 4 * 1024;
 
 #[derive(Clone)]
-struct AppState {
-    pool: SqlitePool,
-    metrics: PrometheusHandle,
+pub struct AppState {
+    pub pool: SqlitePool,
+    pub metrics: PrometheusHandle,
 }
 
 #[derive(Deserialize)]
@@ -63,6 +63,12 @@ pub async fn start_server(port: u16) {
         metrics: handle,
     };
 
+    use tower_http::cors::{CorsLayer, Any};
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     let app = Router::new()
         .route("/", get(serve_portal))
         .route("/health", get(health_check))
@@ -70,6 +76,7 @@ pub async fn start_server(port: u16) {
         .route("/v1/auth/validate", post(validate_key))
         .route("/api/provenance/:metric_id", get(crate::evidence::api::get_provenance))
         .route("/metrics", get(metrics_handler))
+        .layer(cors)
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));

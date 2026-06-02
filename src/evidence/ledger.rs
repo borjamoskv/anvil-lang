@@ -37,8 +37,16 @@ pub struct ProvenanceInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DataOrigin {
+    pub ledger: bool,
+    pub mock: bool,
+    pub replay: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricProvenanceResponse {
     pub metric_id: String,
     pub value: f64,
     pub provenance: ProvenanceInfo,
+    pub data_origin: DataOrigin,
 }
