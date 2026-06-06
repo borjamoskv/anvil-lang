@@ -1,0 +1,38 @@
+# DeXe Protocol Forensic Audit Invariants
+# Focus: TokenSaleProposalBuy precision and commission logic
+
+contract TokenSaleProposalBuy {
+    uint256 constant PRECISION = 10**25;
+
+    function getSaleTokenAmount(uint256 amount, uint256 exchangeRate) public pure returns (uint256) {
+        # Formula: amount * PRECISION / exchangeRate
+        return (amount * PRECISION) / exchangeRate;
+    }
+
+    invariant "no_zero_sale" {
+        # If user pays, they MUST get something if exchangeRate is within bounds
+        forall(uint256 amount, uint256 exchangeRate) {
+            where {
+                amount > 0;
+                exchangeRate < 10**30; # Arbitrary upper bound for "realistic" rates
+                exchangeRate > 0;
+            }
+            assert {
+                getSaleTokenAmount(amount, exchangeRate) > 0;
+            }
+        }
+    }
+
+    invariant "monotonicity" {
+        # Paying more should get you at least as much
+        forall(uint256 a1, uint256 a2, uint256 rate) {
+            where {
+                a1 < a2;
+                rate > 0;
+            }
+            assert {
+                getSaleTokenAmount(a1, rate) <= getSaleTokenAmount(a2, rate);
+            }
+        }
+    }
+}

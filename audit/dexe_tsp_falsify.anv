@@ -1,0 +1,24 @@
+// DeXe Protocol Forensic Audit Invariants
+// Focus: Finding Precision Loss Counterexamples
+
+contract TokenSaleProposalBuy {
+    state precision: u128 = 10000000000000000000000000; // 10^25
+
+    invariant {
+        precision == 10000000000000000000000000
+    }
+
+    pub fn get_sale_token_amount(amount: u128, exchange_rate: u128) -> u128
+        where {
+            amount > 0,
+            exchange_rate > 0,
+            // Assert that the result is non-zero
+            // result' refers to the return value in Anvil
+            result' > 0
+        }
+    {
+        let res = (amount * 10000000000000000000000000) / exchange_rate;
+        assert(res > 0, "DeXe: Zero tokens emitted");
+        return res;
+    }
+}

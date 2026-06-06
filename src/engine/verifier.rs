@@ -118,7 +118,7 @@ pub fn verify_program_with_options(
     for item in &program.items {
         match item {
             Item::Function(f) if !f.invariants.is_empty() => {
-                results.push(verify_function(f, type_env, &no_contract_invs, options));
+                results.push(verify_function(f, type_env, &[], &no_contract_invs, options));
             }
             Item::Contract(c) => {
                 for f in c
@@ -126,7 +126,7 @@ pub fn verify_program_with_options(
                     .iter()
                     .filter(|f| !f.invariants.is_empty() || !c.invariants.is_empty())
                 {
-                    results.push(verify_function(f, type_env, &c.invariants, options));
+                    results.push(verify_function(f, type_env, &c.state_vars, &c.invariants, options));
                 }
             }
             _ => {}
@@ -138,6 +138,7 @@ pub fn verify_program_with_options(
 fn verify_function(
     func: &FnDef,
     _type_env: &TypeEnv,
+    state_vars: &[StateVar],
     contract_invariants: &[Invariant],
     options: VerifyOptions,
 ) -> VerifyResult {
@@ -201,9 +202,39 @@ fn verify_function(
         param_types.insert(param.name.clone(), param.ty.clone());
     }
 
+    // Populate state variables
+    for var in state_vars {
+        let pre = BV::new_const(&ctx, var.name.as_str(), SOLVER_BV_WIDTH);
+        let post = BV::new_const(
+            &ctx,
+            format!("{}_post", var.name).as_str(),
+            SOLVER_BV_WIDTH,
+        );
+        pre_vars.insert(var.name.clone(), pre);
+        post_vars.insert(var.name.clone(), post);
+        param_types.insert(var.name.clone(), var.ty.clone());
+    }
+
+    // Register function return value in post_vars if it returns a non-unit type
+    if let Some(ref ret_ty) = func.return_type {
+        if *ret_ty != Type::Unit {
+            let post = BV::new_const(&ctx, "result_post", SOLVER_BV_WIDTH);
+            post_vars.insert("result".to_string(), post);
+            param_types.insert("result".to_string(), ret_ty.clone());
+        }
+    }
+
     // Inject type constraints from the type checker
     // This bridges the gap between mathematical BV and silicon-bounded integers
-    let local_constraints = type_constraints_for_function(func);
+    let mut local_constraints = type_constraints_for_function(func);
+    for var in state_vars {
+        local_constraints.extend(type_constraints_for_binding(&var.name, &var.ty));
+    }
+    if let Some(ref ret_ty) = func.return_type {
+        if *ret_ty != Type::Unit {
+            local_constraints.extend(type_constraints_for_binding("result", ret_ty));
+        }
+    }
     inject_type_constraints(&ctx, &solver, &pre_vars, &post_vars, &local_constraints);
     let signed_vars = signed_vars_from_constraints(&local_constraints);
 
@@ -1339,7 +1370,15 @@ fn encode_block<'ctx>(
             Stmt::Expr(_) => {
                 // Pure expression statements have no effect on the verification state.
             }
-            _ => {} // Return, etc. — no effect on Z3 state
+            Stmt::Return(Some(expr)) => {
+                if let Some(z3_val) = expr_to_z3(ctx, expr, &encoding.current_vars, &encoding.signed_vars) {
+                    encoding.current_vars.insert("result".to_string(), z3_val);
+                    encoding.modified.insert("result".to_string());
+                } else {
+                    encoding.failures.push("return expression could not be encoded safely".to_string());
+                }
+            }
+            _ => {}
         }
     }
 }
