@@ -15,6 +15,29 @@ test.describe('Observatory Runtime Fidelity (Phase A)', () => {
     });
     page.on('requestfailed', request => failedRequests.push(request.url()));
     
+    // Mock the provenance API to prevent 404 errors during static preview testing
+    await page.route('**/api/provenance/*', async route => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          metric_id: 'CORTEX_AUDIT_LOG_01',
+          value: 1.0,
+          provenance: {
+            level: 'C5-REAL',
+            source: { registry_id: 'CORTEX_AUDIT_LOG_01' },
+            observations: { count: 42, treatments: 7 },
+            derivation: { method: 'Z3_PROVER_CHAIN', timestamp: new Date().toISOString() }
+          },
+          data_origin: {
+            ledger: true,
+            mock: false,
+            replay: false
+          }
+        })
+      });
+    });
+
     await page.goto('/maquina-credibilidad');
   });
 
