@@ -27,7 +27,7 @@ def _probe() -> bool:
     attacker_capital = random.randint(10_000_000, 50_000_000)
     max_borrow = simulate_oracle_attack(pool_liquidity, attacker_capital)
     if max_borrow > attacker_capital * 1.5:
-        print(f"\n[!] EXPLOIT FOUND (Oracle Manipulation):")
+        print("\n[!] EXPLOIT FOUND (Oracle Manipulation):")
         print(f"    Pool Liquidity:  ${pool_liquidity:,.2f}")
         print(f"    Attacker Flash:  ${attacker_capital:,.2f}")
         print(f"    Max Borrow:      ${max_borrow:,.2f}")

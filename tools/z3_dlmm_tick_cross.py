@@ -79,7 +79,7 @@ def main() -> None:
     if res == sat:
         m = s.model()
         print(f"[!] SATISFIABLE: Money Printer encontrado en {elapsed:.2f}s!")
-        print(f"\n--- Parámetros del Exploit ---")
+        print("\n--- Parámetros del Exploit ---")
         print(f"Swap Inicial X: {m[v['swap_in_x']].as_long()}")
         print(
             f"Bin1 Price: {m[v['bin1_price']].as_long()} "
@@ -89,7 +89,7 @@ def main() -> None:
             f"Bin2 Price: {m[v['bin2_price']].as_long()} "
             f"| Bin2 Y: {m[v['bin2_y_scaled']].as_long()}"
         )
-        print(f"\n--- Resultado del Arbitraje ---")
+        print("\n--- Resultado del Arbitraje ---")
         print(f"Total Y obtenido:   {m.eval(v['total_y_out']).as_long()}")
         print(f"Total X recuperado: {m.eval(v['total_x_out']).as_long()}")
     else:

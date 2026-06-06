@@ -1756,7 +1756,7 @@ fn signed_expr_literals_safe(expr: &Expr) -> bool {
                 && block_signed_literals_safe(then_block)
                 && else_block
                     .as_ref()
-                    .is_none_or(|block| block_signed_literals_safe(block))
+                    .is_none_or(block_signed_literals_safe)
         }
         Expr::Block(block) => block_signed_literals_safe(block),
         _ => true,
@@ -1781,7 +1781,7 @@ fn block_signed_literals_safe(block: &Block) -> bool {
                 && block_signed_literals_safe(then_block)
                 && else_block
                     .as_ref()
-                    .is_none_or(|block| block_signed_literals_safe(block))
+                    .is_none_or(block_signed_literals_safe)
         }
         Stmt::While {
             condition, body, ..
@@ -1908,7 +1908,7 @@ fn expr_contains_fncall(expr: &Expr) -> bool {
                 || block_contains_fncall(then_block)
                 || else_block
                     .as_ref()
-                    .is_some_and(|block| block_contains_fncall(block))
+                    .is_some_and(block_contains_fncall)
         }
         Expr::Block(block) => block_contains_fncall(block),
         _ => false,
@@ -1933,7 +1933,7 @@ fn block_contains_fncall(block: &Block) -> bool {
                 || block_contains_fncall(then_block)
                 || else_block
                     .as_ref()
-                    .is_some_and(|block| block_contains_fncall(block))
+                    .is_some_and(block_contains_fncall)
         }
         Stmt::While {
             condition, body, ..
@@ -2306,76 +2306,70 @@ fn simplify_inv_term(term: &InvTerm, constants: &HashMap<String, i128>, in_arith
                     if b != 0 {
                         // Check if left is (X * a) or (a * X)
                         if let InvTerm::BinOp { left: ref xl, op: ArithOp::Mul, right: ref xr } = left_sim {
-                            match (xl.as_ref(), xr.as_ref()) {
-                                (x, r_term) => {
-                                    if let Some(a) = get_literal_val(r_term) {
-                                        let g = gcd(a, b);
-                                        let a_prime = a / g;
-                                        let b_prime = b / g;
-                                        if a_prime == 1 {
-                                            if let Some(k) = is_power_of_two(b_prime) {
-                                                return InvTerm::BinOp {
-                                                    left: Box::new(x.clone()),
-                                                    op: ArithOp::Shr,
-                                                    right: Box::new(InvTerm::Literal(k as i128)),
-                                                };
-                                            } else {
-                                                return InvTerm::BinOp {
-                                                    left: Box::new(x.clone()),
-                                                    op: ArithOp::Div,
-                                                    right: Box::new(InvTerm::Literal(b_prime)),
-                                                };
-                                            }
-                                        } else {
-                                            let new_left = InvTerm::BinOp {
-                                                left: Box::new(x.clone()),
-                                                op: ArithOp::Mul,
-                                                right: Box::new(InvTerm::Literal(a_prime)),
-                                            };
-                                            return InvTerm::BinOp {
-                                                left: Box::new(new_left),
-                                                op: ArithOp::Div,
-                                                right: Box::new(InvTerm::Literal(b_prime)),
-                                            };
-                                        }
+                            let (x, r_term) = (xl.as_ref(), xr.as_ref());
+                            if let Some(a) = get_literal_val(r_term) {
+                                let g = gcd(a, b);
+                                let a_prime = a / g;
+                                let b_prime = b / g;
+                                if a_prime == 1 {
+                                    if let Some(k) = is_power_of_two(b_prime) {
+                                        return InvTerm::BinOp {
+                                            left: Box::new(x.clone()),
+                                            op: ArithOp::Shr,
+                                            right: Box::new(InvTerm::Literal(k as i128)),
+                                        };
+                                    } else {
+                                        return InvTerm::BinOp {
+                                            left: Box::new(x.clone()),
+                                            op: ArithOp::Div,
+                                            right: Box::new(InvTerm::Literal(b_prime)),
+                                        };
                                     }
+                                } else {
+                                    let new_left = InvTerm::BinOp {
+                                        left: Box::new(x.clone()),
+                                        op: ArithOp::Mul,
+                                        right: Box::new(InvTerm::Literal(a_prime)),
+                                    };
+                                    return InvTerm::BinOp {
+                                        left: Box::new(new_left),
+                                        op: ArithOp::Div,
+                                        right: Box::new(InvTerm::Literal(b_prime)),
+                                    };
                                 }
                             }
                         }
                         if let InvTerm::BinOp { left: ref xl, op: ArithOp::Mul, right: ref xr } = left_sim {
-                            match (xl.as_ref(), xr.as_ref()) {
-                                (l_term, x) => {
-                                    if let Some(a) = get_literal_val(l_term) {
-                                        let g = gcd(a, b);
-                                        let a_prime = a / g;
-                                        let b_prime = b / g;
-                                        if a_prime == 1 {
-                                            if let Some(k) = is_power_of_two(b_prime) {
-                                                return InvTerm::BinOp {
-                                                    left: Box::new(x.clone()),
-                                                    op: ArithOp::Shr,
-                                                    right: Box::new(InvTerm::Literal(k as i128)),
-                                                };
-                                            } else {
-                                                return InvTerm::BinOp {
-                                                    left: Box::new(x.clone()),
-                                                    op: ArithOp::Div,
-                                                    right: Box::new(InvTerm::Literal(b_prime)),
-                                                };
-                                            }
-                                        } else {
-                                            let new_left = InvTerm::BinOp {
-                                                left: Box::new(InvTerm::Literal(a_prime)),
-                                                op: ArithOp::Mul,
-                                                right: Box::new(x.clone()),
-                                            };
-                                            return InvTerm::BinOp {
-                                                left: Box::new(new_left),
-                                                op: ArithOp::Div,
-                                                right: Box::new(InvTerm::Literal(b_prime)),
-                                            };
-                                        }
+                            let (l_term, x) = (xl.as_ref(), xr.as_ref());
+                            if let Some(a) = get_literal_val(l_term) {
+                                let g = gcd(a, b);
+                                let a_prime = a / g;
+                                let b_prime = b / g;
+                                if a_prime == 1 {
+                                    if let Some(k) = is_power_of_two(b_prime) {
+                                        return InvTerm::BinOp {
+                                            left: Box::new(x.clone()),
+                                            op: ArithOp::Shr,
+                                            right: Box::new(InvTerm::Literal(k as i128)),
+                                        };
+                                    } else {
+                                        return InvTerm::BinOp {
+                                            left: Box::new(x.clone()),
+                                            op: ArithOp::Div,
+                                            right: Box::new(InvTerm::Literal(b_prime)),
+                                        };
                                     }
+                                } else {
+                                    let new_left = InvTerm::BinOp {
+                                        left: Box::new(InvTerm::Literal(a_prime)),
+                                        op: ArithOp::Mul,
+                                        right: Box::new(x.clone()),
+                                    };
+                                    return InvTerm::BinOp {
+                                        left: Box::new(new_left),
+                                        op: ArithOp::Div,
+                                        right: Box::new(InvTerm::Literal(b_prime)),
+                                    };
                                 }
                             }
                         }
@@ -2466,19 +2460,19 @@ fn simplify_expr(expr: &Expr, constants: &HashMap<String, i128>, in_arith_op: bo
             expr.clone()
         }
         Expr::BinOp { left, op, right } => {
-            let is_arith = match op {
+            let is_arith = matches!(
+                op,
                 BinOp::Add
-                | BinOp::Sub
-                | BinOp::Mul
-                | BinOp::Div
-                | BinOp::Mod
-                | BinOp::BitAnd
-                | BinOp::BitOr
-                | BinOp::BitXor
-                | BinOp::Shl
-                | BinOp::Shr => true,
-                _ => false,
-            };
+                    | BinOp::Sub
+                    | BinOp::Mul
+                    | BinOp::Div
+                    | BinOp::Mod
+                    | BinOp::BitAnd
+                    | BinOp::BitOr
+                    | BinOp::BitXor
+                    | BinOp::Shl
+                    | BinOp::Shr
+            );
             let left_sim = simplify_expr(left, constants, is_arith);
             let right_sim = simplify_expr(right, constants, is_arith);
 
@@ -2487,76 +2481,70 @@ fn simplify_expr(expr: &Expr, constants: &HashMap<String, i128>, in_arith_op: bo
                 if let Some(b) = get_expr_literal_val(&right_sim) {
                     if b != 0 {
                         if let Expr::BinOp { left: ref xl, op: BinOp::Mul, right: ref xr } = left_sim {
-                            match (xl.as_ref(), xr.as_ref()) {
-                                (x, r_term) => {
-                                    if let Some(a) = get_expr_literal_val(r_term) {
-                                        let g = gcd(a, b);
-                                        let a_prime = a / g;
-                                        let b_prime = b / g;
-                                        if a_prime == 1 {
-                                            if let Some(k) = is_power_of_two(b_prime) {
-                                                return Expr::BinOp {
-                                                    left: Box::new(x.clone()),
-                                                    op: BinOp::Shr,
-                                                    right: Box::new(Expr::IntLit(k as i128)),
-                                                };
-                                            } else {
-                                                return Expr::BinOp {
-                                                    left: Box::new(x.clone()),
-                                                    op: BinOp::Div,
-                                                    right: Box::new(Expr::IntLit(b_prime)),
-                                                };
-                                            }
-                                        } else {
-                                            let new_left = Expr::BinOp {
-                                                left: Box::new(x.clone()),
-                                                op: BinOp::Mul,
-                                                right: Box::new(Expr::IntLit(a_prime)),
-                                            };
-                                            return Expr::BinOp {
-                                                left: Box::new(new_left),
-                                                op: BinOp::Div,
-                                                right: Box::new(Expr::IntLit(b_prime)),
-                                            };
-                                        }
+                            let (x, r_term) = (xl.as_ref(), xr.as_ref());
+                            if let Some(a) = get_expr_literal_val(r_term) {
+                                let g = gcd(a, b);
+                                let a_prime = a / g;
+                                let b_prime = b / g;
+                                if a_prime == 1 {
+                                    if let Some(k) = is_power_of_two(b_prime) {
+                                        return Expr::BinOp {
+                                            left: Box::new(x.clone()),
+                                            op: BinOp::Shr,
+                                            right: Box::new(Expr::IntLit(k as i128)),
+                                        };
+                                    } else {
+                                        return Expr::BinOp {
+                                            left: Box::new(x.clone()),
+                                            op: BinOp::Div,
+                                            right: Box::new(Expr::IntLit(b_prime)),
+                                        };
                                     }
+                                } else {
+                                    let new_left = Expr::BinOp {
+                                        left: Box::new(x.clone()),
+                                        op: BinOp::Mul,
+                                        right: Box::new(Expr::IntLit(a_prime)),
+                                    };
+                                    return Expr::BinOp {
+                                        left: Box::new(new_left),
+                                        op: BinOp::Div,
+                                        right: Box::new(Expr::IntLit(b_prime)),
+                                    };
                                 }
                             }
                         }
                         if let Expr::BinOp { left: ref xl, op: BinOp::Mul, right: ref xr } = left_sim {
-                            match (xl.as_ref(), xr.as_ref()) {
-                                (l_term, x) => {
-                                    if let Some(a) = get_expr_literal_val(l_term) {
-                                        let g = gcd(a, b);
-                                        let a_prime = a / g;
-                                        let b_prime = b / g;
-                                        if a_prime == 1 {
-                                            if let Some(k) = is_power_of_two(b_prime) {
-                                                return Expr::BinOp {
-                                                    left: Box::new(x.clone()),
-                                                    op: BinOp::Shr,
-                                                    right: Box::new(Expr::IntLit(k as i128)),
-                                                };
-                                            } else {
-                                                return Expr::BinOp {
-                                                    left: Box::new(x.clone()),
-                                                    op: BinOp::Div,
-                                                    right: Box::new(Expr::IntLit(b_prime)),
-                                                };
-                                            }
-                                        } else {
-                                            let new_left = Expr::BinOp {
-                                                left: Box::new(Expr::IntLit(a_prime)),
-                                                op: BinOp::Mul,
-                                                right: Box::new(x.clone()),
-                                            };
-                                            return Expr::BinOp {
-                                                left: Box::new(new_left),
-                                                op: BinOp::Div,
-                                                right: Box::new(Expr::IntLit(b_prime)),
-                                            };
-                                        }
+                            let (l_term, x) = (xl.as_ref(), xr.as_ref());
+                            if let Some(a) = get_expr_literal_val(l_term) {
+                                let g = gcd(a, b);
+                                let a_prime = a / g;
+                                let b_prime = b / g;
+                                if a_prime == 1 {
+                                    if let Some(k) = is_power_of_two(b_prime) {
+                                        return Expr::BinOp {
+                                            left: Box::new(x.clone()),
+                                            op: BinOp::Shr,
+                                            right: Box::new(Expr::IntLit(k as i128)),
+                                        };
+                                    } else {
+                                        return Expr::BinOp {
+                                            left: Box::new(x.clone()),
+                                            op: BinOp::Div,
+                                            right: Box::new(Expr::IntLit(b_prime)),
+                                        };
                                     }
+                                } else {
+                                    let new_left = Expr::BinOp {
+                                        left: Box::new(Expr::IntLit(a_prime)),
+                                        op: BinOp::Mul,
+                                        right: Box::new(x.clone()),
+                                    };
+                                    return Expr::BinOp {
+                                        left: Box::new(new_left),
+                                        op: BinOp::Div,
+                                        right: Box::new(Expr::IntLit(b_prime)),
+                                    };
                                 }
                             }
                         }

@@ -104,7 +104,7 @@ def main():
         sys.exit(1)
     
     print(BANNER)
-    print(f"  CORTEX MAIL SENTINEL v1.0")
+    print("  CORTEX MAIL SENTINEL v1.0")
     print(f"  Watching: {WATCH_SENDER} ({WATCH_NAME})")
     print(f"  Interval: {CHECK_INTERVAL_SECONDS}s")
     print(f"  Account: {GMAIL_USER}")

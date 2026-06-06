@@ -30,6 +30,7 @@ pub async fn initialize_ledger_table(pool: &SqlitePool) -> Result<(), sqlx::Erro
 }
 
 // C5-REAL: Append-only ledger interface. No updates allowed.
+#[allow(clippy::too_many_arguments)]
 pub async fn append_ledger_event(
     pool: &SqlitePool,
     metric_id: String,

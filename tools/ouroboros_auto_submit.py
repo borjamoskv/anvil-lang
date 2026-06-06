@@ -18,7 +18,6 @@ import sys
 import json
 import hashlib
 import zipfile
-import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -372,24 +371,24 @@ def generate_submission_snapshot(target_id: str, taint: str, zip_path: Optional[
 
     content_lines = [
         f"# Submission: {target['name']}",
-        f"",
+        "",
         f"**Date:** {datetime.now(timezone.utc).isoformat()}",
         f"**Severity:** {target['severity']}",
         f"**Platform:** {target['platform']}",
         f"**Title:** {target['title']}",
-        f"",
-        f"## CORTEX-TAINT",
-        f"```",
+        "",
+        "## CORTEX-TAINT",
+        "```",
         f"{taint}",
-        f"```",
-        f"",
-        f"## Report",
+        "```",
+        "",
+        "## Report",
         f"Source: `{target['report']}`",
-        f"",
-        f"## Payload",
+        "",
+        "## Payload",
         f"ZIP: `{zip_path or 'N/A'}`",
-        f"",
-        f"## PoC Files",
+        "",
+        "## PoC Files",
     ]
     for poc in target.get("poc_files", []):
         exists = "✅" if os.path.exists(poc) else "❌"
@@ -461,7 +460,7 @@ def cmd_prepare(target_id: str, inject: bool = False, submit: bool = False, dry_
     """Full strike preparation pipeline."""
     if target_id not in TARGETS:
         print(f"❌ Unknown target ID: {target_id}")
-        print(f"   Run: python3 ouroboros_auto_submit.py list")
+        print("   Run: python3 ouroboros_auto_submit.py list")
         sys.exit(1)
 
     target = TARGETS[target_id]
@@ -475,13 +474,13 @@ def cmd_prepare(target_id: str, inject: bool = False, submit: bool = False, dry_
     print("\n[1/5] Validating report structure...")
     is_valid, missing = validate_report(report_path)
     if is_valid:
-        print(f"  ✅ All required sections present")
+        print("  ✅ All required sections present")
     else:
         print(f"  ⚠  Missing sections: {', '.join(missing)}")
         if "FILE_NOT_FOUND" in missing[0]:
-            print(f"  ❌ ABORT: Report file does not exist.")
+            print("  ❌ ABORT: Report file does not exist.")
             sys.exit(1)
-        print(f"  ⚠  Proceeding with warnings — review before submission.")
+        print("  ⚠  Proceeding with warnings — review before submission.")
 
     # ── Step 2: Generate CORTEX-TAINT ────────────────────────────────
     print("\n[2/5] Generating CORTEX-TAINT signature...")
@@ -499,7 +498,7 @@ def cmd_prepare(target_id: str, inject: bool = False, submit: bool = False, dry_
         print(f"  📦 ZIP: {zip_path}")
         print(f"  📦 Size: {zip_size:,} bytes | SHA3: {zip_hash[:16]}...")
     else:
-        print(f"  ⚠  No ZIP generated (report missing)")
+        print("  ⚠  No ZIP generated (report missing)")
 
     # ── Step 4: Snapshot + Ledger ────────────────────────────────────
     print("\n[4/5] Recording submission in ledger...")
@@ -558,16 +557,16 @@ def cmd_prepare(target_id: str, inject: bool = False, submit: bool = False, dry_
             if clipboard_inject(final_payload):
                 print(f"  ✅ Payload injected into clipboard ({len(final_payload):,} chars)")
             else:
-                print(f"  ❌ Clipboard injection failed. Manual copy required:")
+                print("  ❌ Clipboard injection failed. Manual copy required:")
                 print(f"     pbcopy < {report_path}")
     else:
-        print(f"  ℹ  Delivery skipped (use --inject, --submit, or --dry-run)")
+        print("  ℹ  Delivery skipped (use --inject, --submit, or --dry-run)")
         print(f"  ℹ  Manual: pbcopy < {report_path}")
 
     # ── Summary ──────────────────────────────────────────────────────
     platform_url = IMMUNEFI_URL if target["platform"] == "immunefi" else CODE4RENA_URL
     print(f"\n{BANNER}")
-    print(f"🐍 [OUROBOROS v3.0] STRIKE READY")
+    print("🐍 [OUROBOROS v3.0] STRIKE READY")
     print(BANNER)
     print(f"  Target:   {target['name']}")
     print(f"  Title:    {target['title']}")
@@ -579,11 +578,11 @@ def cmd_prepare(target_id: str, inject: bool = False, submit: bool = False, dry_
     if submit:
         print(f"  → DRAFT created at {platform_url}. Manual finalization required.")
     elif dry_run:
-        print(f"  → Dry-run complete. Network paths validated.")
+        print("  → Dry-run complete. Network paths validated.")
     elif inject:
-        print(f"  → Cmd+V in the submission form. Attach ZIP if available.")
+        print("  → Cmd+V in the submission form. Attach ZIP if available.")
     else:
-        print(f"  → Run with --inject, --submit, or --dry-run to proceed.")
+        print("  → Run with --inject, --submit, or --dry-run to proceed.")
     print(BANNER)
 
 

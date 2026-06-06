@@ -27,7 +27,7 @@ def clone_target_repo(repo_url, target_name):
     print(f"[*] Clonando repositorio {repo_url} en {target_dir}...")
     try:
         subprocess.run(["git", "clone", repo_url, target_dir], check=True, capture_output=True)
-        print(f"[+] Repositorio clonado con éxito.")
+        print("[+] Repositorio clonado con éxito.")
     except subprocess.CalledProcessError as e:
         print(f"[!] Error al clonar el repositorio: {e.stderr.decode()}")
     return target_dir

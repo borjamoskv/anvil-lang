@@ -5,7 +5,7 @@ Reality levels:
   - C5-REAL: Connected to Anvil/L2, traces anchored on-chain
   - C4-SIMULACIÓN: No RPC, traces stored off-chain only
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import json

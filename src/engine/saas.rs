@@ -229,7 +229,7 @@ async fn verify_contract(
         }
     };
 
-    let source_bytes = payload.source_code.as_bytes().len();
+    let source_bytes = payload.source_code.len();
     let span = info_span!("verify_contract", source_len = source_bytes);
 
     if source_bytes > MAX_SOURCE_BYTES {

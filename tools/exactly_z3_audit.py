@@ -9,8 +9,6 @@ Replicas exactas de la aritmética WAD de Solidity en Python.
 No requiere Z3 — usa búsqueda exhaustiva sobre el espacio de parámetros.
 ======================================================================
 """
-import sys
-from itertools import product
 
 WAD = 10**18
 TARGET_HEALTH = 1_250_000_000_000_000_000  # 1.25e18
@@ -201,11 +199,11 @@ for n in [1, 5, 10, 20, 50, 100, 150, 200, 256]:
         status = "✅ SAFE"
     print(f"  {n:>8} | {g1:>12,} | {g2:>12,} | {total:>12,} | {pct:>7.1f}% | {status}")
 
-print(f"\n  [*] Max markets: 256 (uint8 index in MarketData)")
-print(f"  [*] Current Exactly markets: ~23 (from Immunefi scope)")
-print(f"  [*] Verdict: With 23 markets, gas is SAFE (~1.3% of block)")
-print(f"  [*] However, the protocol CAN add up to 256 markets.")
-print(f"  [*] At 150+ markets with expensive clearBadDebt, DoS is viable.")
+print("\n  [*] Max markets: 256 (uint8 index in MarketData)")
+print("  [*] Current Exactly markets: ~23 (from Immunefi scope)")
+print("  [*] Verdict: With 23 markets, gas is SAFE (~1.3% of block)")
+print("  [*] However, the protocol CAN add up to 256 markets.")
+print("  [*] At 150+ markets with expensive clearBadDebt, DoS is viable.")
 
 
 # =====================================================================
@@ -261,14 +259,14 @@ for amt in micro_amounts:
     print(f"  {amt:>12} | {lenders:>12} | {seized:>14} | {zero}")
 
 if found_rounding:
-    print(f"\n  [!] VULNERABILITY CONFIRMED: Micro-liquidations allow liquidator to")
-    print(f"      seize assets while lenders receive ZERO compensation.")
-    print(f"      Impact: Repeated micro-liquidations drain protocol value to liquidator")
-    print(f"      while depositors/lenders absorb 100% of the loss.")
-    print(f"      Severity: MEDIUM-HIGH (economic extraction, not direct theft)")
+    print("\n  [!] VULNERABILITY CONFIRMED: Micro-liquidations allow liquidator to")
+    print("      seize assets while lenders receive ZERO compensation.")
+    print("      Impact: Repeated micro-liquidations drain protocol value to liquidator")
+    print("      while depositors/lenders absorb 100% of the loss.")
+    print("      Severity: MEDIUM-HIGH (economic extraction, not direct theft)")
 
 # Search: rounding profit accumulation
-print(f"\n  Simulating repeated micro-liquidation attack (1000 iterations)...")
+print("\n  Simulating repeated micro-liquidation attack (1000 iterations)...")
 total_stolen = 0
 total_lender_loss = 0
 repay_per_iter = 99  # Just below the threshold where lenders get 1 wei
@@ -288,10 +286,10 @@ if total_stolen > 0:
     print(f"  Total seized (1000 micro-liquidations): {total_stolen} wei")
     print(f"  Total seized in WETH:                   {total_stolen / 1e18:.10f} WETH")
     print(f"  Total seized in USD:                    ${total_stolen / 1e18 * 3000:.6f}")
-    print(f"  Lenders received:                       0 (across all 1000 iterations)")
+    print("  Lenders received:                       0 (across all 1000 iterations)")
     print(f"  Per-iteration profit:                   {total_stolen // 1000} wei")
 else:
-    print(f"  No rounding profit detected at this repay amount.")
+    print("  No rounding profit detected at this repay amount.")
 
 
 # =====================================================================

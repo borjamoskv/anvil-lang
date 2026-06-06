@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 # [C5-REAL] — Industrial Noir Overlay — Sovereign UI
-import sys
-import os
 import signal
 from AppKit import *
 from WebKit import *

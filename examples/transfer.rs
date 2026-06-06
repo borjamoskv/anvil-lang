@@ -19,7 +19,7 @@ fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64 {
     s -= amount;
     r += amount;
     let _ = r;
-    return s;
+    s
 }
 
 /// Verified invariants (6 proven):
@@ -32,5 +32,5 @@ fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64 {
 fn liquidate(_debt: u64, repay_amount: u64, _close_factor: u64, total_repaid: u64) -> u64 {
     let mut tr = total_repaid;
     tr += repay_amount;
-    return tr;
+    tr
 }

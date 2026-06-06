@@ -98,7 +98,7 @@ def deploy(rpc_url: str, private_key: str):
         sys.exit(1)
 
     deployed_address = receipt.contractAddress
-    print(f"\n[C5-REAL] ArchiLedger Deployed Successfully!")
+    print("\n[C5-REAL] ArchiLedger Deployed Successfully!")
     print(f"  -> Contract Address: {deployed_address}")
     print(f"  -> Block Number: {receipt.blockNumber}")
     print(f"  -> Gas Used: {receipt.gasUsed} units")
@@ -130,11 +130,11 @@ def deploy(rpc_url: str, private_key: str):
     print(f"  Base: {receipt.gasUsed} gas * {w3.from_wei(gas_price, 'gwei')} Gwei/gas * {eth_usd_rate} USD/ETH * 100")
     print("  Variables:")
     print(f"    r: {w3.from_wei(gas_price, 'ether'):.18f} (Gas price in ETH)")
-    print(f"    d: 1 (Dimension)")
+    print("    d: 1 (Dimension)")
     print(f"    n: {receipt.gasUsed} (Gas units used)")
-    print(f"    S: 100 (Singularity constant)")
+    print("    S: 100 (Singularity constant)")
     print(f"  Range: [{exergy_metric*0.9:.4f} USD*S, {exergy_metric*1.1:.4f} USD*S]")
-    print(f"  Confidence: C5-REAL (On-chain verified transaction)")
+    print("  Confidence: C5-REAL (On-chain verified transaction)")
     print("="*50 + "\n")
 
 def simulate_mock_deployment():

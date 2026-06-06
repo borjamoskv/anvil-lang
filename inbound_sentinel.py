@@ -1,7 +1,5 @@
-import os
 import time
 import subprocess
-import sys
 
 POLL_INTERVAL = 30
 SENDER = "sealons@yahoo.es"
@@ -49,7 +47,7 @@ def poll():
                 subprocess.run(["osascript", "-e", script], capture_output=True, timeout=15)
                 print("[0x01_CORE] ✔ Reply Dispatched (C5-REAL). Awaiting next signal.", flush=True)
                 
-        except Exception as e:
+        except Exception:
             # Silently ignore TCC timeouts or Mail.app blocking
             pass
         time.sleep(POLL_INTERVAL)

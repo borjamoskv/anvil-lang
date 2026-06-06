@@ -112,7 +112,7 @@ def run_all_proofs():
     effective_max = min(max_zero_lps, max_zero_proto)  # 3332
 
     # At amount=3332: fee_lps = 3332*3//10000 = 0, fee_proto = 3332*2//10000 = 0
-    test_amt = 3332
+    test_amt = effective_max
     fee_l = test_amt * swap_fee_lps // 10000
     fee_p = test_amt * swap_fee_protocol // 10000
     print(f"  At amount={test_amt}: fee_lps={fee_l}, fee_proto={fee_p}, total_fee={fee_l+fee_p}")
@@ -146,11 +146,11 @@ def run_all_proofs():
     # If x_decimals=8, y_decimals=6, scaling factor = 10^2 = 100
     # Scaled amounts up to 3333 * 100 = 333,300 base units could be zero-fee
     
-    print(f"\n  Impact Assessment:")
+    print("\n  Impact Assessment:")
     print(f"  - Raw: {boundary-1} base units = negligible value")
     print(f"  - Scaled (8 vs 6 decimal): {(boundary-1)} scaled units")
-    print(f"  - Real value: ~$0.00003 per swap = NOT economically exploitable")
-    print(f"  - Verdict: VALID BUG, LOW SEVERITY (dust amounts only)")
+    print("  - Real value: ~$0.00003 per swap = NOT economically exploitable")
+    print("  - Verdict: VALID BUG, LOW SEVERITY (dust amounts only)")
 
     results.append({
         "vector": "fee_truncation",
@@ -331,7 +331,7 @@ def run_all_proofs():
     print("=" * 60)
 
     sat_results = [r for r in results if r["status"] == "SAT"]
-    print(f"\n  Vectors tested: 4")
+    print("\n  Vectors tested: 4")
     print(f"  SAT (findings): {len(sat_results)}")
 
     for r in sat_results:

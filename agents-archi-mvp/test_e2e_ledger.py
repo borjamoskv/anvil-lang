@@ -46,7 +46,7 @@ def main():
         address=contract_addr, abi=abi
     )
 
-    print(f"[Ω] ArchiLedger E2E Test")
+    print("[Ω] ArchiLedger E2E Test")
     print(f"    Contract: {contract_addr}")
     print(f"    Chain ID: {w3.eth.chain_id}")
     print()
@@ -111,14 +111,14 @@ def main():
         trace_hash_bytes
     ).call()
     agent_id, domain, timestamp, submitter = trace_data
-    print(f"[5] On-chain Trace Data:")
+    print("[5] On-chain Trace Data:")
     print(f"    agentId:   {agent_id}")
     print(f"    domain:    {domain}")
     print(f"    timestamp: {timestamp}")
     print(f"    submitter: {submitter}")
 
     # --- Step 6: Replay protection ---
-    print(f"[6] Testing replay protection...")
+    print("[6] Testing replay protection...")
     nonce2 = w3.eth.get_transaction_count(account.address)
     tx2 = contract.functions.anchorTrace(
         trace_hash_bytes,
@@ -138,9 +138,9 @@ def main():
     )
     receipt2 = w3.eth.wait_for_transaction_receipt(tx_hash2)
     if receipt2.status == 0:
-        print(f"    [OK] Replay REJECTED (tx reverted as expected)")
+        print("    [OK] Replay REJECTED (tx reverted as expected)")
     else:
-        print(f"    [FAIL] Replay was NOT rejected!")
+        print("    [FAIL] Replay was NOT rejected!")
         sys.exit(1)
 
     # --- Result ---
