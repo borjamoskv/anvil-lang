@@ -1,0 +1,18 @@
+// ============================================================
+// ARENA ALLOC DYNAMIC STRUCT — Typecheck Failure Test
+// ============================================================
+
+struct DynamicStruct {
+    data: [u64],
+    id: u64
+}
+
+fn test_alloc_dynamic(mut arena: Arena<16>, s: DynamicStruct) -> u64
+    where {
+        1 == 1
+    }
+{
+    // REJECTED: DynamicStruct contains an array ([u64]), which is dynamic size.
+    let p = alloc(arena, s);
+    return 1;
+}

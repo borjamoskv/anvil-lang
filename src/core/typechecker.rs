@@ -24,6 +24,7 @@ pub struct TypeEnv {
     pub errors: Vec<TypeError>,
     /// Warnings (non-fatal, informational)
     pub warnings: Vec<TypeWarning>,
+    pub structs: HashMap<String, StructDef>,
 }
 
 #[derive(Debug, Clone)]
@@ -62,6 +63,7 @@ impl TypeEnv {
             constraints: Vec::new(),
             errors: Vec::new(),
             warnings: Vec::new(),
+            structs: HashMap::new(),
         }
     }
 
@@ -224,6 +226,13 @@ impl Default for TypeEnv {
 /// Check an entire program for type consistency
 pub fn check_program(program: &Program) -> TypeEnv {
     let mut env = TypeEnv::new();
+
+    // Register all struct definitions first
+    for item in &program.items {
+        if let Item::Struct(s) = item {
+            env.structs.insert(s.name.clone(), s.clone());
+        }
+    }
 
     for item in &program.items {
         match item {
@@ -983,11 +992,30 @@ fn format_type(ty: &Type) -> String {
     }
 }
 
-fn type_is_fixed_size(ty: &Type) -> bool {
-    match ty {
-        Type::Array(_) | Type::Map(_, _) | Type::Option(_) | Type::Result(_, _) | Type::Arena(_) => false,
-        _ => true,
+fn type_is_fixed_size(ty: &Type, env: &TypeEnv) -> bool {
+    fn check_recursive(ty: &Type, env: &TypeEnv, visited: &mut std::collections::HashSet<String>) -> bool {
+        match ty {
+            Type::Array(_) | Type::Map(_, _) | Type::Option(_) | Type::Result(_, _) | Type::Arena(_) => false,
+            Type::Named(name) => {
+                if name.starts_with('*') {
+                    return true; // Pointer is always fixed size
+                }
+                if !visited.insert(name.clone()) {
+                    return false; // Loop/Self-referential struct not behind pointer is not fixed-size/invalid
+                }
+                let is_fixed = if let Some(struct_def) = env.structs.get(name) {
+                    struct_def.fields.iter().all(|field| check_recursive(&field.ty, env, visited))
+                } else {
+                    true
+                };
+                visited.remove(name);
+                is_fixed
+            }
+            _ => true,
+        }
     }
+    let mut visited = std::collections::HashSet::new();
+    check_recursive(ty, env, &mut visited)
 }
 
 fn check_expr(expr: &Expr, env: &mut TypeEnv, location: &str) {
@@ -1000,7 +1028,7 @@ fn check_expr(expr: &Expr, env: &mut TypeEnv, location: &str) {
             match arena_ty {
                 Some(Type::Arena(_)) => {
                     if let Some(value_ty) = infer_expr_type(value, env) {
-                        if !type_is_fixed_size(&value_ty) {
+                        if !type_is_fixed_size(&value_ty, env) {
                             env.errors.push(TypeError {
                                 message: format!(
                                     "Cannot allocate dynamic type '{}' on Arena",

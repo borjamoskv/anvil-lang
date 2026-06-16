@@ -263,6 +263,7 @@ parse_test!(parse_uniswap_ingested, "uniswap_ingested.anv");
 parse_test!(parse_vacuous, "vacuous.anv");
 parse_test!(parse_arena_alloc, "arena_alloc.anv");
 parse_test!(parse_arena_alloc_safe, "arena_alloc_safe.anv");
+parse_test!(parse_arena_alloc_dynamic_struct, "arena_alloc_dynamic_struct.anv");
 
 // ============================================================
 // PHASE B: Full Pipeline — Verification Result Tests
@@ -327,6 +328,17 @@ fn verify_arena_alloc_mixed() {
     assert!(
         output.contains("can exceed capacity") || output.contains("OOM"),
         "Expected OOM error message: {}",
+        output
+    );
+}
+
+#[test]
+fn verify_arena_alloc_dynamic_struct_rejected() {
+    let (success, output) = run_anvil_check("arena_alloc_dynamic_struct.anv");
+    assert!(!success, "arena_alloc_dynamic_struct.anv typechecking should fail: {}", output);
+    assert!(
+        output.contains("Cannot allocate dynamic type") || output.contains("DynamicStruct"),
+        "Expected typechecking error on dynamic struct allocation: {}",
         output
     );
 }
