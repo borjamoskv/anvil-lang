@@ -1,0 +1,36 @@
+// ============================================================
+// ANVIL COMPILER AST - TYPECHECKER (Ouroboros)
+// HoTT Univalence Rule Enforcer
+// ============================================================
+
+// El TypeChecker de Anvil en modo Ouroboros emite restricciones formales
+// que deben ser probables topológicamente.
+
+contract HoTTChecker {
+    state current_node_id: u64 = 0;
+
+    // Invariante: La prueba topológica no puede alterar el estado, solo leerlo
+    invariant {
+        current_node_id >= 0
+    }
+
+    pub fn type_check_expr(expr_id: u64, expected_kind: u8, actual_kind: u8) -> bool 
+        where {
+            expected_kind == actual_kind // Univalence Check
+        }
+    {
+        // Si el compilador evalúa un tipo diferente al esperado, se colapsa la ejecución.
+        // `assert!` genera una restricción dura en el Agda Backend asociado.
+        assert!(expected_kind == actual_kind, "HoTT Violation: Type Equivalence failed.");
+        return true;
+    }
+
+    pub fn univalence_bind(source_type: u8, target_type: u8) -> bool 
+        where {
+            source_type == target_type // (A ≃ B) -> (A = B)
+        }
+    {
+        assert!(source_type == target_type, "Univalence Bind Failed. Types are not isomorphic.");
+        return true;
+    }
+}

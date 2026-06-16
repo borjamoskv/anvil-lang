@@ -1,0 +1,45 @@
+// ============================================================
+// ANVIL COMPILER AST - LEXICAL SCANNER (Ouroboros)
+// Topologically Safe Tokenizer
+// ============================================================
+
+struct Token {
+    kind: u8, // 0=EOF, 1=Ident, 2=Number, 3=Keyword, 4=Operator
+    start_pos: u64,
+    end_pos: u64
+}
+
+// LexerState acts as a state machine enforcing that the cursor only moves forward.
+contract LexerState {
+    state cursor: u64 = 0;
+    state source_len: u64;
+
+    // Invariante HoTT: La lectura de un archivo nunca retrocede (monotonicidad).
+    invariant {
+        cursor >= 0,
+        cursor <= source_len
+    }
+
+    pub fn init(length: u64) {
+        source_len = length;
+        cursor = 0;
+    }
+
+    pub fn advance(mut cursor: u64, amount: u64) -> u64 
+        where {
+            cursor' == cursor + amount,
+            cursor' <= source_len
+        }
+    {
+        cursor += amount;
+        return cursor;
+    }
+
+    pub fn emit_token(kind: u8, start: u64, end: u64) -> Token {
+        return Token {
+            kind: kind,
+            start_pos: start,
+            end_pos: end
+        };
+    }
+}

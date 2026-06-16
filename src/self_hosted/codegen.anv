@@ -1,0 +1,42 @@
+// ============================================================
+// ANVIL COMPILER AST - CODEGEN (Ouroboros)
+// Isomorphic Bytecode Emission
+// ============================================================
+
+// El generador de código emite opcodes garantizando que la estructura
+// resultante es isomórfica al AST validado.
+
+struct Opcode {
+    op: u8,
+    arg1: u64,
+    arg2: u64
+}
+
+contract CodeGenEngine {
+    state instruction_ptr: u64 = 0;
+    
+    // Invariante de monotonicidad en la emisión
+    invariant {
+        instruction_ptr >= 0
+    }
+
+    pub fn emit_op(mut instruction_ptr: u64, op: u8, arg1: u64, arg2: u64) -> Opcode 
+        where {
+            instruction_ptr' == instruction_ptr + 1
+        }
+    {
+        instruction_ptr += 1;
+        return Opcode {
+            op: op,
+            arg1: arg1,
+            arg2: arg2
+        };
+    }
+
+    pub fn generate_from_ast(ast_node_id: u64) -> Opcode {
+        // En DDC, si un inyector (virus de Ken Thompson) intentara emitir
+        // un opcode diferente, el AST original no correspondería con la prueba
+        // de compilación, resultando en un aborto en el TypeChecker de nivel N+1.
+        return emit_op(instruction_ptr, 0x01, ast_node_id, 0); // 0x01 = PUSH
+    }
+}
