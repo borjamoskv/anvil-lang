@@ -182,10 +182,8 @@ fn run_anvil_build_path(path: &Path, target: &str) -> (bool, String) {
         output_path.to_str().unwrap().to_string(),
     ];
 
-    if target == "llvm" {
-        args.push("--target".to_string());
-        args.push("llvm".to_string());
-    }
+    args.push("--target".to_string());
+    args.push(target.to_string());
 
     let mut command = Command::new(&binary);
     command.args(&args);
@@ -444,6 +442,17 @@ fn build_transfer_llvm() {
     assert!(
         output.contains("Generated") || output.contains(".ll"),
         "Should indicate LLVM IR generation: {}",
+        output
+    );
+}
+
+#[test]
+fn build_transfer_silicon() {
+    let (success, output) = run_anvil_build("transfer.anv", "silicon");
+    assert!(success, "transfer.anv should build to Silicon: {}", output);
+    assert!(
+        output.contains("Generated") || output.contains(".bin") || output.contains(".v"),
+        "Should indicate Silicon/Verilog files generation: {}",
         output
     );
 }

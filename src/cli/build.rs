@@ -9,10 +9,10 @@ use crate::engine::{codegen, llvm_ir, verifier};
 pub fn cmd_build(file: &Path, output: &Path, target: &str, timeout_ms: u64) {
     let _span =
         info_span!("cmd_build", file = %file.display(), target = target, timeout_ms).entered();
-    if !matches!(target, "rust" | "llvm") {
+    if !matches!(target, "rust" | "llvm" | "silicon") {
         error!(target, "Unsupported build target");
         eprintln!(
-            "  {} Unsupported build target '{}'. Use 'rust' or 'llvm'.",
+            "  {} Unsupported build target '{}'. Use 'rust', 'llvm', or 'silicon'.",
             "✗".bright_red(),
             target
         );
@@ -132,6 +132,61 @@ pub fn cmd_build(file: &Path, output: &Path, target: &str, timeout_ms: u64) {
                 std::process::exit(1);
             }
         }
+    } else if target == "silicon" {
+        eprintln!(
+            "  {} Generating RTL Verilog & ASIC Bitstream...",
+            "→".bright_blue()
+        );
+        let compiler = crate::singularity::DirectSiliconCompiler::default();
+        match compiler.compile_to_bitstream(&program) {
+            Ok(bitstream) => {
+                let out_path = output.with_extension("bin");
+                match std::fs::write(&out_path, &bitstream) {
+                    Ok(_) => {
+                        info!(path = %out_path.display(), bytes = bitstream.len(), "Direct silicon bitstream generated");
+                        eprintln!(
+                            "  {} Generated {} ({} bytes)",
+                            "✓".bright_green(),
+                            out_path.display(),
+                            bitstream.len()
+                        );
+                    }
+                    Err(e) => {
+                        error!(path = %out_path.display(), error = %e, "Cannot write bitstream");
+                        eprintln!(
+                            "  {} Cannot write {}: {}",
+                            "✗".bright_red(),
+                            out_path.display(),
+                            e
+                        );
+                        std::process::exit(1);
+                    }
+                }
+
+                // Also output the synthesized Verilog code for direct inspection/validation
+                let verilog = crate::singularity::synthesize_ast_to_verilog(&program);
+                let verilog_path = output.with_extension("v");
+                if let Err(e) = std::fs::write(&verilog_path, &verilog) {
+                    error!(path = %verilog_path.display(), error = %e, "Cannot write RTL Verilog");
+                } else {
+                    eprintln!(
+                        "  {} Generated RTL Verilog {} ({} bytes)",
+                        "✓".bright_green(),
+                        verilog_path.display(),
+                        verilog.len()
+                    );
+                }
+            }
+            Err(e) => {
+                error!(error = %e, "ASIC/FPGA fabric synthesis failed");
+                eprintln!(
+                    "  {} ASIC/FPGA fabric synthesis failed: {}",
+                    "✗".bright_red(),
+                    e
+                );
+                std::process::exit(1);
+            }
+        }
     } else {
         eprintln!("  {} Generating Rust...", "→".bright_blue());
         let rust_code = codegen::generate_rust(&program);
@@ -164,6 +219,9 @@ pub fn cmd_build(file: &Path, output: &Path, target: &str, timeout_ms: u64) {
 }
 
 fn unsupported_build_feature(program: &Program, target: &str) -> Option<&'static str> {
+    if target == "silicon" {
+        return None;
+    }
     if program.items.iter().any(item_uses_u256_or_big_literal) {
         return Some(match target {
             "rust" => "the Rust backend does not yet emit a runtime U256 implementation",

@@ -55,7 +55,7 @@ enum Commands {
         /// Output path for generated code
         #[arg(short, long, default_value = "out")]
         output: PathBuf,
-        /// Target architecture (rust, llvm)
+        /// Target architecture (rust, llvm, silicon)
         #[arg(short, long, default_value = "rust")]
         target: String,
         /// Z3 solver timeout per check, in milliseconds
