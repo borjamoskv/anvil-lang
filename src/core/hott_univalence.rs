@@ -71,3 +71,39 @@ pub trait Univalence {
 pub fn verify_univalence_integrity<T: Univalence>(a: T, b: T) -> bool {
     a.prove_equivalence(&b).is_some()
 }
+
+#[cfg(test)]
+mod stress_tests {
+    use super::*;
+    use std::time::Instant;
+
+    #[test]
+    fn test_topological_load_1_million_nodes() {
+        // C5-REAL: Execution test for massive homotopy type topologies
+        let mut groupoid: InfinityGroupoid<usize> = InfinityGroupoid::new();
+        let num_nodes = 1_000_000;
+        
+        let start_inject = Instant::now();
+        for i in 0..num_nodes {
+            groupoid.inject_0_cell(i);
+        }
+        let duration_inject = start_inject.elapsed();
+        println!("Injected {} 0-cells in {:?}", num_nodes, duration_inject);
+
+        let start_paths = Instant::now();
+        for i in 0..(num_nodes - 1) {
+            groupoid.establish_1_cell_equivalence(i, i + 1);
+        }
+        let duration_paths = start_paths.elapsed();
+        println!("Established {} 1-cells in {:?}", num_nodes - 1, duration_paths);
+
+        assert_eq!(groupoid.points.len(), num_nodes);
+        assert_eq!(groupoid.paths.len(), num_nodes - 1);
+        
+        // Assert univalence path structure
+        let path = &groupoid.paths[0];
+        assert_eq!(path.origin, 0);
+        assert_eq!(path.target, 1);
+        assert!(!path.is_reflexive());
+    }
+}
