@@ -65,7 +65,7 @@ pub async fn start_server(port: u16) {
         metrics: handle,
     };
 
-    use tower_http::cors::{CorsLayer, Any};
+    use tower_http::cors::{Any, CorsLayer};
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)
@@ -76,7 +76,10 @@ pub async fn start_server(port: u16) {
         .route("/health", get(health_check))
         .route("/v1/verify", post(verify_contract))
         .route("/v1/auth/validate", post(validate_key))
-        .route("/api/provenance/:metric_id", get(crate::evidence::api::get_provenance))
+        .route(
+            "/api/provenance/:metric_id",
+            get(crate::evidence::api::get_provenance),
+        )
         .route("/metrics", get(metrics_handler))
         .layer(cors)
         .with_state(state);

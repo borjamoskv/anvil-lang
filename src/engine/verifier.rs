@@ -118,7 +118,13 @@ pub fn verify_program_with_options(
     for item in &program.items {
         match item {
             Item::Function(f) if !f.invariants.is_empty() => {
-                results.push(verify_function(f, type_env, &[], &no_contract_invs, options));
+                results.push(verify_function(
+                    f,
+                    type_env,
+                    &[],
+                    &no_contract_invs,
+                    options,
+                ));
             }
             Item::Contract(c) => {
                 for f in c
@@ -126,7 +132,13 @@ pub fn verify_program_with_options(
                     .iter()
                     .filter(|f| !f.invariants.is_empty() || !c.invariants.is_empty())
                 {
-                    results.push(verify_function(f, type_env, &c.state_vars, &c.invariants, options));
+                    results.push(verify_function(
+                        f,
+                        type_env,
+                        &c.state_vars,
+                        &c.invariants,
+                        options,
+                    ));
                 }
             }
             _ => {}
@@ -146,26 +158,41 @@ fn verify_function(
     let start = Instant::now();
 
     // Extract raw preconditions first to find known constants
-    let preconditions_raw: Vec<&Invariant> = func.invariants.iter().filter(|inv| !invariant_uses_post(&inv.expr)).collect();
+    let preconditions_raw: Vec<&Invariant> = func
+        .invariants
+        .iter()
+        .filter(|inv| !invariant_uses_post(&inv.expr))
+        .collect();
     let constants = collect_known_constants(&preconditions_raw);
 
     // Simplify the function AST
     let mut simplified_func = func.clone();
-    simplified_func.invariants = simplified_func.invariants.into_iter().map(|inv| Invariant {
-        expr: simplify_invariant_expr(&inv.expr, &constants),
-        span: inv.span,
-    }).collect();
-    simplified_func.assumes = simplified_func.assumes.into_iter().map(|inv| Invariant {
-        expr: simplify_invariant_expr(&inv.expr, &constants),
-        span: inv.span,
-    }).collect();
+    simplified_func.invariants = simplified_func
+        .invariants
+        .into_iter()
+        .map(|inv| Invariant {
+            expr: simplify_invariant_expr(&inv.expr, &constants),
+            span: inv.span,
+        })
+        .collect();
+    simplified_func.assumes = simplified_func
+        .assumes
+        .into_iter()
+        .map(|inv| Invariant {
+            expr: simplify_invariant_expr(&inv.expr, &constants),
+            span: inv.span,
+        })
+        .collect();
     simplified_func.body = simplify_block(&simplified_func.body, &constants);
 
     // Simplify contract invariants
-    let simplified_contract_invariants: Vec<Invariant> = contract_invariants.iter().map(|inv| Invariant {
-        expr: simplify_invariant_expr(&inv.expr, &constants),
-        span: inv.span.clone(),
-    }).collect();
+    let simplified_contract_invariants: Vec<Invariant> = contract_invariants
+        .iter()
+        .map(|inv| Invariant {
+            expr: simplify_invariant_expr(&inv.expr, &constants),
+            span: inv.span.clone(),
+        })
+        .collect();
 
     // Shadow func and contract_invariants so the rest of the function operates on the simplified AST
     let func = &simplified_func;
@@ -205,11 +232,7 @@ fn verify_function(
     // Populate state variables
     for var in state_vars {
         let pre = BV::new_const(&ctx, var.name.as_str(), SOLVER_BV_WIDTH);
-        let post = BV::new_const(
-            &ctx,
-            format!("{}_post", var.name).as_str(),
-            SOLVER_BV_WIDTH,
-        );
+        let post = BV::new_const(&ctx, format!("{}_post", var.name).as_str(), SOLVER_BV_WIDTH);
         pre_vars.insert(var.name.clone(), pre);
         post_vars.insert(var.name.clone(), post);
         param_types.insert(var.name.clone(), var.ty.clone());
@@ -1371,11 +1394,15 @@ fn encode_block<'ctx>(
                 // Pure expression statements have no effect on the verification state.
             }
             Stmt::Return(Some(expr)) => {
-                if let Some(z3_val) = expr_to_z3(ctx, expr, &encoding.current_vars, &encoding.signed_vars) {
+                if let Some(z3_val) =
+                    expr_to_z3(ctx, expr, &encoding.current_vars, &encoding.signed_vars)
+                {
                     encoding.current_vars.insert("result".to_string(), z3_val);
                     encoding.modified.insert("result".to_string());
                 } else {
-                    encoding.failures.push("return expression could not be encoded safely".to_string());
+                    encoding
+                        .failures
+                        .push("return expression could not be encoded safely".to_string());
                 }
             }
             _ => {}
@@ -1793,9 +1820,7 @@ fn signed_expr_literals_safe(expr: &Expr) -> bool {
         } => {
             signed_expr_literals_safe(condition)
                 && block_signed_literals_safe(then_block)
-                && else_block
-                    .as_ref()
-                    .is_none_or(block_signed_literals_safe)
+                && else_block.as_ref().is_none_or(block_signed_literals_safe)
         }
         Expr::Block(block) => block_signed_literals_safe(block),
         _ => true,
@@ -1818,9 +1843,7 @@ fn block_signed_literals_safe(block: &Block) -> bool {
         } => {
             signed_expr_literals_safe(condition)
                 && block_signed_literals_safe(then_block)
-                && else_block
-                    .as_ref()
-                    .is_none_or(block_signed_literals_safe)
+                && else_block.as_ref().is_none_or(block_signed_literals_safe)
         }
         Stmt::While {
             condition, body, ..
@@ -1945,9 +1968,7 @@ fn expr_contains_fncall(expr: &Expr) -> bool {
         } => {
             expr_contains_fncall(condition)
                 || block_contains_fncall(then_block)
-                || else_block
-                    .as_ref()
-                    .is_some_and(block_contains_fncall)
+                || else_block.as_ref().is_some_and(block_contains_fncall)
         }
         Expr::Block(block) => block_contains_fncall(block),
         _ => false,
@@ -1970,9 +1991,7 @@ fn block_contains_fncall(block: &Block) -> bool {
         } => {
             expr_contains_fncall(condition)
                 || block_contains_fncall(then_block)
-                || else_block
-                    .as_ref()
-                    .is_some_and(block_contains_fncall)
+                || else_block.as_ref().is_some_and(block_contains_fncall)
         }
         Stmt::While {
             condition, body, ..
@@ -2270,14 +2289,31 @@ pub fn print_results(results: &[VerifyResult]) {
 fn collect_known_constants(preconditions: &[&Invariant]) -> HashMap<String, i128> {
     let mut constants = HashMap::new();
     for pre in preconditions {
-        if let InvariantExpr::Comparison { left, op: CmpOp::Eq, right } = &pre.expr {
+        if let InvariantExpr::Comparison {
+            left,
+            op: CmpOp::Eq,
+            right,
+        } = &pre.expr
+        {
             match (left.as_ref(), right.as_ref()) {
-                (InvTerm::Var { name, is_post: false }, right_term) => {
+                (
+                    InvTerm::Var {
+                        name,
+                        is_post: false,
+                    },
+                    right_term,
+                ) => {
                     if let Some(val) = get_literal_val(right_term) {
                         constants.insert(name.clone(), val);
                     }
                 }
-                (left_term, InvTerm::Var { name, is_post: false }) => {
+                (
+                    left_term,
+                    InvTerm::Var {
+                        name,
+                        is_post: false,
+                    },
+                ) => {
                     if let Some(val) = get_literal_val(left_term) {
                         constants.insert(name.clone(), val);
                     }
@@ -2325,7 +2361,11 @@ fn is_power_of_two(n: i128) -> Option<u32> {
     }
 }
 
-fn simplify_inv_term(term: &InvTerm, constants: &HashMap<String, i128>, in_arith_op: bool) -> InvTerm {
+fn simplify_inv_term(
+    term: &InvTerm,
+    constants: &HashMap<String, i128>,
+    in_arith_op: bool,
+) -> InvTerm {
     match term {
         InvTerm::Var { name, is_post } => {
             if !*is_post && in_arith_op {
@@ -2344,7 +2384,12 @@ fn simplify_inv_term(term: &InvTerm, constants: &HashMap<String, i128>, in_arith
                 if let Some(b) = get_literal_val(&right_sim) {
                     if b != 0 {
                         // Check if left is (X * a) or (a * X)
-                        if let InvTerm::BinOp { left: ref xl, op: ArithOp::Mul, right: ref xr } = left_sim {
+                        if let InvTerm::BinOp {
+                            left: ref xl,
+                            op: ArithOp::Mul,
+                            right: ref xr,
+                        } = left_sim
+                        {
                             let (x, r_term) = (xl.as_ref(), xr.as_ref());
                             if let Some(a) = get_literal_val(r_term) {
                                 let g = gcd(a, b);
@@ -2378,7 +2423,12 @@ fn simplify_inv_term(term: &InvTerm, constants: &HashMap<String, i128>, in_arith
                                 }
                             }
                         }
-                        if let InvTerm::BinOp { left: ref xl, op: ArithOp::Mul, right: ref xr } = left_sim {
+                        if let InvTerm::BinOp {
+                            left: ref xl,
+                            op: ArithOp::Mul,
+                            right: ref xr,
+                        } = left_sim
+                        {
                             let (l_term, x) = (xl.as_ref(), xr.as_ref());
                             if let Some(a) = get_literal_val(l_term) {
                                 let g = gcd(a, b);
@@ -2418,7 +2468,7 @@ fn simplify_inv_term(term: &InvTerm, constants: &HashMap<String, i128>, in_arith
                             return InvTerm::BinOp {
                                 left: Box::new(left_sim),
                                 op: ArithOp::Shr,
-                                  right: Box::new(InvTerm::Literal(k as i128)),
+                                right: Box::new(InvTerm::Literal(k as i128)),
                             };
                         }
                     }
@@ -2431,8 +2481,20 @@ fn simplify_inv_term(term: &InvTerm, constants: &HashMap<String, i128>, in_arith
                     ArithOp::Add => Some(a.wrapping_add(b)),
                     ArithOp::Sub => Some(a.wrapping_sub(b)),
                     ArithOp::Mul => Some(a.wrapping_mul(b)),
-                    ArithOp::Div => if b != 0 { Some(a.wrapping_div(b)) } else { None },
-                    ArithOp::Mod => if b != 0 { Some(a.wrapping_rem(b)) } else { None },
+                    ArithOp::Div => {
+                        if b != 0 {
+                            Some(a.wrapping_div(b))
+                        } else {
+                            None
+                        }
+                    }
+                    ArithOp::Mod => {
+                        if b != 0 {
+                            Some(a.wrapping_rem(b))
+                        } else {
+                            None
+                        }
+                    }
                     ArithOp::BitAnd => Some(a & b),
                     ArithOp::BitOr => Some(a | b),
                     ArithOp::BitXor => Some(a ^ b),
@@ -2451,14 +2513,23 @@ fn simplify_inv_term(term: &InvTerm, constants: &HashMap<String, i128>, in_arith
             }
         }
         InvTerm::FnCall { name, args } => {
-            let args_sim = args.iter().map(|arg| simplify_inv_term(arg, constants, false)).collect();
-            InvTerm::FnCall { name: name.clone(), args: args_sim }
+            let args_sim = args
+                .iter()
+                .map(|arg| simplify_inv_term(arg, constants, false))
+                .collect();
+            InvTerm::FnCall {
+                name: name.clone(),
+                args: args_sim,
+            }
         }
         _ => term.clone(),
     }
 }
 
-fn simplify_invariant_expr(expr: &InvariantExpr, constants: &HashMap<String, i128>) -> InvariantExpr {
+fn simplify_invariant_expr(
+    expr: &InvariantExpr,
+    constants: &HashMap<String, i128>,
+) -> InvariantExpr {
     match expr {
         InvariantExpr::Comparison { left, op, right } => InvariantExpr::Comparison {
             left: Box::new(simplify_inv_term(left, constants, false)),
@@ -2473,7 +2544,9 @@ fn simplify_invariant_expr(expr: &InvariantExpr, constants: &HashMap<String, i12
             Box::new(simplify_invariant_expr(a, constants)),
             Box::new(simplify_invariant_expr(b, constants)),
         ),
-        InvariantExpr::Not(a) => InvariantExpr::Not(Box::new(simplify_invariant_expr(a, constants))),
+        InvariantExpr::Not(a) => {
+            InvariantExpr::Not(Box::new(simplify_invariant_expr(a, constants)))
+        }
         InvariantExpr::Forall { var, domain, body } => InvariantExpr::Forall {
             var: var.clone(),
             domain: Box::new(simplify_inv_term(domain, constants, false)),
@@ -2519,7 +2592,12 @@ fn simplify_expr(expr: &Expr, constants: &HashMap<String, i128>, in_arith_op: bo
             if *op == BinOp::Div {
                 if let Some(b) = get_expr_literal_val(&right_sim) {
                     if b != 0 {
-                        if let Expr::BinOp { left: ref xl, op: BinOp::Mul, right: ref xr } = left_sim {
+                        if let Expr::BinOp {
+                            left: ref xl,
+                            op: BinOp::Mul,
+                            right: ref xr,
+                        } = left_sim
+                        {
                             let (x, r_term) = (xl.as_ref(), xr.as_ref());
                             if let Some(a) = get_expr_literal_val(r_term) {
                                 let g = gcd(a, b);
@@ -2553,7 +2631,12 @@ fn simplify_expr(expr: &Expr, constants: &HashMap<String, i128>, in_arith_op: bo
                                 }
                             }
                         }
-                        if let Expr::BinOp { left: ref xl, op: BinOp::Mul, right: ref xr } = left_sim {
+                        if let Expr::BinOp {
+                            left: ref xl,
+                            op: BinOp::Mul,
+                            right: ref xr,
+                        } = left_sim
+                        {
                             let (l_term, x) = (xl.as_ref(), xr.as_ref());
                             if let Some(a) = get_expr_literal_val(l_term) {
                                 let g = gcd(a, b);
@@ -2600,13 +2683,28 @@ fn simplify_expr(expr: &Expr, constants: &HashMap<String, i128>, in_arith_op: bo
             }
 
             // Constant folding
-            if let (Some(a), Some(b)) = (get_expr_literal_val(&left_sim), get_expr_literal_val(&right_sim)) {
+            if let (Some(a), Some(b)) = (
+                get_expr_literal_val(&left_sim),
+                get_expr_literal_val(&right_sim),
+            ) {
                 let folded = match op {
                     BinOp::Add => Some(a.wrapping_add(b)),
                     BinOp::Sub => Some(a.wrapping_sub(b)),
                     BinOp::Mul => Some(a.wrapping_mul(b)),
-                    BinOp::Div => if b != 0 { Some(a.wrapping_div(b)) } else { None },
-                    BinOp::Mod => if b != 0 { Some(a.wrapping_rem(b)) } else { None },
+                    BinOp::Div => {
+                        if b != 0 {
+                            Some(a.wrapping_div(b))
+                        } else {
+                            None
+                        }
+                    }
+                    BinOp::Mod => {
+                        if b != 0 {
+                            Some(a.wrapping_rem(b))
+                        } else {
+                            None
+                        }
+                    }
                     BinOp::BitAnd => Some(a & b),
                     BinOp::BitOr => Some(a | b),
                     BinOp::BitXor => Some(a ^ b),
@@ -2637,16 +2735,32 @@ fn simplify_expr(expr: &Expr, constants: &HashMap<String, i128>, in_arith_op: bo
                     return Expr::IntLit(v);
                 }
             }
-            Expr::UnaryOp { op: op.clone(), operand: Box::new(operand_sim) }
+            Expr::UnaryOp {
+                op: op.clone(),
+                operand: Box::new(operand_sim),
+            }
         }
         Expr::FnCall { name, args } => {
-            let args_sim = args.iter().map(|arg| simplify_expr(arg, constants, false)).collect();
-            Expr::FnCall { name: name.clone(), args: args_sim }
+            let args_sim = args
+                .iter()
+                .map(|arg| simplify_expr(arg, constants, false))
+                .collect();
+            Expr::FnCall {
+                name: name.clone(),
+                args: args_sim,
+            }
         }
-        Expr::MethodCall { object, method, args } => Expr::MethodCall {
+        Expr::MethodCall {
+            object,
+            method,
+            args,
+        } => Expr::MethodCall {
             object: Box::new(simplify_expr(object, constants, false)),
             method: method.clone(),
-            args: args.iter().map(|e| simplify_expr(e, constants, false)).collect(),
+            args: args
+                .iter()
+                .map(|e| simplify_expr(e, constants, false))
+                .collect(),
         },
         Expr::FieldAccess { object, field } => Expr::FieldAccess {
             object: Box::new(simplify_expr(object, constants, false)),
@@ -2656,7 +2770,11 @@ fn simplify_expr(expr: &Expr, constants: &HashMap<String, i128>, in_arith_op: bo
             object: Box::new(simplify_expr(object, constants, false)),
             index: Box::new(simplify_expr(index, constants, false)),
         },
-        Expr::If { condition, then_block, else_block } => {
+        Expr::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
             let cond_sim = simplify_expr(condition, constants, false);
             let then_sim = simplify_block(then_block, constants);
             let else_sim = else_block.as_ref().map(|b| simplify_block(b, constants));
@@ -2672,9 +2790,19 @@ fn simplify_expr(expr: &Expr, constants: &HashMap<String, i128>, in_arith_op: bo
 }
 
 fn simplify_block(block: &Block, constants: &HashMap<String, i128>) -> Block {
-    let stmts_sim = block.stmts.iter().map(|stmt| simplify_stmt(stmt, constants)).collect();
-    let expr_sim = block.expr.as_ref().map(|e| Box::new(simplify_expr(e, constants, false)));
-    Block { stmts: stmts_sim, expr: expr_sim }
+    let stmts_sim = block
+        .stmts
+        .iter()
+        .map(|stmt| simplify_stmt(stmt, constants))
+        .collect();
+    let expr_sim = block
+        .expr
+        .as_ref()
+        .map(|e| Box::new(simplify_expr(e, constants, false)));
+    Block {
+        stmts: stmts_sim,
+        expr: expr_sim,
+    }
 }
 
 fn simplify_lvalue(lval: &LValue, constants: &HashMap<String, i128>) -> LValue {
@@ -2693,7 +2821,12 @@ fn simplify_lvalue(lval: &LValue, constants: &HashMap<String, i128>) -> LValue {
 
 fn simplify_stmt(stmt: &Stmt, constants: &HashMap<String, i128>) -> Stmt {
     match stmt {
-        Stmt::Let { name, ty, is_mut, value } => Stmt::Let {
+        Stmt::Let {
+            name,
+            ty,
+            is_mut,
+            value,
+        } => Stmt::Let {
             name: name.clone(),
             ty: ty.clone(),
             is_mut: *is_mut,
@@ -2704,30 +2837,46 @@ fn simplify_stmt(stmt: &Stmt, constants: &HashMap<String, i128>) -> Stmt {
             op: op.clone(),
             value: simplify_expr(value, constants, false),
         },
-        Stmt::If { condition, then_block, else_block } => Stmt::If {
+        Stmt::If {
+            condition,
+            then_block,
+            else_block,
+        } => Stmt::If {
             condition: simplify_expr(condition, constants, false),
             then_block: simplify_block(then_block, constants),
             else_block: else_block.as_ref().map(|b| simplify_block(b, constants)),
         },
-        Stmt::While { condition, invariants, body } => {
-            let invs_sim = invariants.iter().map(|inv| Invariant {
-                expr: simplify_invariant_expr(&inv.expr, constants),
-                span: inv.span.clone(),
-            }).collect();
+        Stmt::While {
+            condition,
+            invariants,
+            body,
+        } => {
+            let invs_sim = invariants
+                .iter()
+                .map(|inv| Invariant {
+                    expr: simplify_invariant_expr(&inv.expr, constants),
+                    span: inv.span.clone(),
+                })
+                .collect();
             Stmt::While {
                 condition: simplify_expr(condition, constants, false),
                 invariants: invs_sim,
                 body: simplify_block(body, constants),
             }
         }
-        Stmt::Return(expr) => Stmt::Return(expr.as_ref().map(|e| simplify_expr(e, constants, false))),
+        Stmt::Return(expr) => {
+            Stmt::Return(expr.as_ref().map(|e| simplify_expr(e, constants, false)))
+        }
         Stmt::Assert { condition, message } => Stmt::Assert {
             condition: simplify_expr(condition, constants, false),
             message: message.clone(),
         },
         Stmt::Emit { event, args } => Stmt::Emit {
             event: event.clone(),
-            args: args.iter().map(|e| simplify_expr(e, constants, false)).collect(),
+            args: args
+                .iter()
+                .map(|e| simplify_expr(e, constants, false))
+                .collect(),
         },
         Stmt::Ghost { name, ty, value } => Stmt::Ghost {
             name: name.clone(),
@@ -2737,4 +2886,3 @@ fn simplify_stmt(stmt: &Stmt, constants: &HashMap<String, i128>) -> Stmt {
         Stmt::Expr(expr) => Stmt::Expr(simplify_expr(expr, constants, false)),
     }
 }
-

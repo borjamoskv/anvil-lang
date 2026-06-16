@@ -1,10 +1,12 @@
+use crate::evidence::ledger::LedgerEvent;
+use chrono::Utc;
 use sqlx::sqlite::SqlitePool;
 use uuid::Uuid;
-use chrono::Utc;
-use crate::evidence::ledger::LedgerEvent;
 
 pub async fn initialize_ledger_table(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query("DROP TABLE IF EXISTS traceability_ledger").execute(pool).await?;
+    sqlx::query("DROP TABLE IF EXISTS traceability_ledger")
+        .execute(pool)
+        .await?;
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS traceability_ledger (
@@ -17,14 +19,16 @@ pub async fn initialize_ledger_table(pool: &SqlitePool) -> Result<(), sqlx::Erro
             transformation TEXT NOT NULL,
             output_hash TEXT NOT NULL,
             timestamp TEXT NOT NULL
-        )"
+        )",
     )
     .execute(pool)
     .await?;
 
-    sqlx::query("CREATE INDEX IF NOT EXISTS idx_traceability_metric_id ON traceability_ledger (metric_id)")
-        .execute(pool)
-        .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_traceability_metric_id ON traceability_ledger (metric_id)",
+    )
+    .execute(pool)
+    .await?;
 
     Ok(())
 }
@@ -74,7 +78,10 @@ pub async fn append_ledger_event(
 }
 
 // Read the latest event for a metric stream
-pub async fn get_ledger_event(pool: &SqlitePool, metric_id: &str) -> Result<Option<LedgerEvent>, sqlx::Error> {
+pub async fn get_ledger_event(
+    pool: &SqlitePool,
+    metric_id: &str,
+) -> Result<Option<LedgerEvent>, sqlx::Error> {
     use sqlx::Row;
     let record = sqlx::query(
         "SELECT event_id, metric_id, metric_value, parent_event_id, source_type, source_hash, transformation, output_hash, timestamp
