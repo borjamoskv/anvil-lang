@@ -29,7 +29,7 @@ impl<T: PartialEq + Clone> IdentityPath<T> {
 }
 
 /// Infinity-Groupoid: The universal data structure representing types and their higher-order equivalences.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct InfinityGroupoid<T> {
     pub points: Vec<T>, // 0-cells (Objects/Types)
     pub paths: Vec<IdentityPath<T>>, // 1-cells (Equivalences)
