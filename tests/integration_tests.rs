@@ -264,6 +264,8 @@ parse_test!(parse_vacuous, "vacuous.anv");
 parse_test!(parse_arena_alloc, "arena_alloc.anv");
 parse_test!(parse_arena_alloc_safe, "arena_alloc_safe.anv");
 parse_test!(parse_arena_alloc_dynamic_struct, "arena_alloc_dynamic_struct.anv");
+parse_test!(parse_arena_alloc_pointer_field, "arena_alloc_pointer_field.anv");
+
 
 // ============================================================
 // PHASE B: Full Pipeline — Verification Result Tests
@@ -305,6 +307,13 @@ fn verify_overflow_proven() {
     let (success, output) = run_anvil_check("overflow.anv");
     assert!(success, "overflow.anv should verify: {}", output);
 }
+
+#[test]
+fn verify_arena_alloc_pointer_field_proven() {
+    let (success, output) = run_anvil_check("arena_alloc_pointer_field.anv");
+    assert!(success, "arena_alloc_pointer_field.anv should verify: {}", output);
+}
+
 
 // --- Files that should contain REJECTIONS (counterexamples found) ---
 
@@ -515,6 +524,25 @@ fn build_arena_alloc_silicon() {
     let (success, output) = run_anvil_build("arena_alloc_safe.anv", "silicon");
     assert!(success, "arena_alloc_safe.anv should build to Silicon: {}", output);
 }
+
+#[test]
+fn build_arena_alloc_pointer_field_rust() {
+    let (success, output) = run_anvil_build("arena_alloc_pointer_field.anv", "rust");
+    assert!(success, "arena_alloc_pointer_field.anv should build to Rust: {}", output);
+}
+
+#[test]
+fn build_arena_alloc_pointer_field_llvm() {
+    let (success, output) = run_anvil_build("arena_alloc_pointer_field.anv", "llvm");
+    assert!(success, "arena_alloc_pointer_field.anv should build to LLVM: {}", output);
+}
+
+#[test]
+fn build_arena_alloc_pointer_field_silicon() {
+    let (success, output) = run_anvil_build("arena_alloc_pointer_field.anv", "silicon");
+    assert!(success, "arena_alloc_pointer_field.anv should build to Silicon: {}", output);
+}
+
 
 // ============================================================
 // PHASE D: Regression Tests for Specific Bugs

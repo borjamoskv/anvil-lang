@@ -962,7 +962,7 @@ fn promote_types(a: &Type, b: &Type) -> Type {
     if ra >= rb { a.clone() } else { b.clone() }
 }
 
-fn format_type(ty: &Type) -> String {
+pub fn format_type(ty: &Type) -> String {
     match ty {
         Type::U8 => "u8".into(),
         Type::U16 => "u16".into(),

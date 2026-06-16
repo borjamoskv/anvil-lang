@@ -377,7 +377,13 @@ fn type_size_helper_verilog(ty: &crate::core::ast::Type, struct_sizes: &std::col
         crate::core::ast::Type::U256 | crate::core::ast::Type::Wallet | crate::core::ast::Type::TxHash => Some(32),
         crate::core::ast::Type::Address => Some(20),
         crate::core::ast::Type::Signature => Some(65),
-        crate::core::ast::Type::Named(name) => struct_sizes.get(name).cloned(),
+        crate::core::ast::Type::Named(name) => {
+            if name.starts_with('*') {
+                Some(8)
+            } else {
+                struct_sizes.get(name).cloned()
+            }
+        }
         _ => None,
     }
 }
@@ -392,7 +398,13 @@ fn verilog_type_size(ty: &crate::core::ast::Type, struct_sizes: &std::collection
         crate::core::ast::Type::U256 | crate::core::ast::Type::Wallet | crate::core::ast::Type::TxHash => 32,
         crate::core::ast::Type::Address => 20,
         crate::core::ast::Type::Signature => 65,
-        crate::core::ast::Type::Named(name) => struct_sizes.get(name).cloned().unwrap_or(8),
+        crate::core::ast::Type::Named(name) => {
+            if name.starts_with('*') {
+                8
+            } else {
+                struct_sizes.get(name).cloned().unwrap_or(8)
+            }
+        }
         _ => 8,
     }
 }

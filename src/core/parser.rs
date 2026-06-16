@@ -3,6 +3,7 @@
 // ============================================================
 
 use crate::core::ast::*;
+use crate::core::typechecker::format_type;
 use pest::Parser;
 use pest_derive::Parser;
 
@@ -133,6 +134,10 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type, String> {
         Rule::array_type => {
             let inner_ty = parse_type(inner.into_inner().next().unwrap())?;
             Ok(Type::Array(Box::new(inner_ty)))
+        }
+        Rule::pointer_type => {
+            let inner_ty = parse_type(inner.into_inner().next().unwrap())?;
+            Ok(Type::Named(format!("*{}", format_type(&inner_ty))))
         }
         Rule::map_type => {
             let mut inners = inner.into_inner();

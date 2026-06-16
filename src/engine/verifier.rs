@@ -2992,7 +2992,13 @@ fn type_size_helper(ty: &Type, struct_sizes: &HashMap<String, usize>) -> Option<
         Type::U256 | Type::Wallet | Type::TxHash => Some(32),
         Type::Address => Some(20),
         Type::Signature => Some(65),
-        Type::Named(name) => struct_sizes.get(name).cloned(),
+        Type::Named(name) => {
+            if name.starts_with('*') {
+                Some(8)
+            } else {
+                struct_sizes.get(name).cloned()
+            }
+        }
         _ => None, // Dynamic types are not fixed-size
     }
 }
@@ -3010,6 +3016,13 @@ fn verifier_type_size(ty: &Type) -> usize {
         Type::U256 | Type::Wallet | Type::TxHash => 32,
         Type::Address => 20,
         Type::Signature => 65,
+        Type::Named(name) => {
+            if name.starts_with('*') {
+                8
+            } else {
+                8
+            }
+        }
         _ => 8,
     }
 }

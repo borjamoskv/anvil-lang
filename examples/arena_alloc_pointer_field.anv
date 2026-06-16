@@ -1,0 +1,20 @@
+// ============================================================
+// ARENA ALLOC POINTER FIELD — First-Class Pointer Type Test
+// ============================================================
+
+struct Node {
+    value: u64,
+    next: *Node
+}
+
+fn test_alloc_pointer_struct(mut arena: Arena<32>, n: Node) -> u64
+    where {
+        1 == 1
+    }
+{
+    // Node has a pointer field (next: *Node).
+    // The verifier and LLVM should correctly size Node (8 bytes value + 8 bytes next pointer = 16 bytes).
+    // Allocating a Node of size 16 (8-byte aligned) on a 32-byte Arena should fit twice.
+    let p_node = alloc(arena, n);
+    return 1;
+}
