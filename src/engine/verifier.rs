@@ -60,6 +60,7 @@ struct BodyEncoding<'ctx> {
     signed_vars: HashSet<String>,
     failures: Vec<String>,
     fresh_counter: usize,
+    struct_sizes: HashMap<String, usize>,
 }
 
 impl<'ctx> BodyEncoding<'ctx> {
@@ -67,6 +68,7 @@ impl<'ctx> BodyEncoding<'ctx> {
         current_vars: HashMap<String, BV<'ctx>>,
         var_types: HashMap<String, Type>,
         signed_vars: HashSet<String>,
+        struct_sizes: HashMap<String, usize>,
     ) -> Self {
         Self {
             modified: HashSet::new(),
@@ -75,6 +77,7 @@ impl<'ctx> BodyEncoding<'ctx> {
             signed_vars,
             failures: Vec::new(),
             fresh_counter: 0,
+            struct_sizes,
         }
     }
 
@@ -93,8 +96,9 @@ impl<'ctx> BodyEncoding<'ctx> {
             current_vars,
             var_types: self.var_types.clone(),
             signed_vars: self.signed_vars.clone(),
-            failures: Vec::new(),
+            failures: self.failures.clone(),
             fresh_counter: self.fresh_counter,
+            struct_sizes: self.struct_sizes.clone(),
         }
     }
 
@@ -113,6 +117,7 @@ pub fn verify_program_with_options(
     type_env: &TypeEnv,
     options: VerifyOptions,
 ) -> Vec<VerifyResult> {
+    let struct_sizes = calculate_struct_sizes(program);
     let mut results = Vec::new();
     let no_contract_invs: Vec<Invariant> = Vec::new();
     for item in &program.items {
@@ -124,6 +129,7 @@ pub fn verify_program_with_options(
                     &[],
                     &no_contract_invs,
                     options,
+                    &struct_sizes,
                 ));
             }
             Item::Contract(c) => {
@@ -138,6 +144,7 @@ pub fn verify_program_with_options(
                         &c.state_vars,
                         &c.invariants,
                         options,
+                        &struct_sizes,
                     ));
                 }
             }
@@ -153,6 +160,7 @@ fn verify_function(
     state_vars: &[StateVar],
     contract_invariants: &[Invariant],
     options: VerifyOptions,
+    struct_sizes: &HashMap<String, usize>,
 ) -> VerifyResult {
     let _span = info_span!("verify_function", fn_name = %func.name).entered();
     let start = Instant::now();
@@ -227,6 +235,13 @@ fn verify_function(
         pre_vars.insert(param.name.clone(), pre);
         post_vars.insert(param.name.clone(), post);
         param_types.insert(param.name.clone(), param.ty.clone());
+
+        if let Type::Arena(_) = &param.ty {
+            let offset_name = format!("{}_offset", param.name);
+            let offset_pre = BV::from_i64(&ctx, 0, SOLVER_BV_WIDTH);
+            pre_vars.insert(offset_name.clone(), offset_pre);
+            param_types.insert(offset_name, Type::U64);
+        }
     }
 
     // Populate state variables
@@ -236,6 +251,13 @@ fn verify_function(
         pre_vars.insert(var.name.clone(), pre);
         post_vars.insert(var.name.clone(), post);
         param_types.insert(var.name.clone(), var.ty.clone());
+
+        if let Type::Arena(_) = &var.ty {
+            let offset_name = format!("{}_offset", var.name);
+            let offset_pre = BV::from_i64(&ctx, 0, SOLVER_BV_WIDTH);
+            pre_vars.insert(offset_name.clone(), offset_pre);
+            param_types.insert(offset_name, Type::U64);
+        }
     }
 
     // Register function return value in post_vars if it returns a non-unit type
@@ -359,6 +381,7 @@ fn verify_function(
         &post_vars,
         &param_types,
         &signed_vars,
+        struct_sizes.clone(),
     );
 
     // Step 3: Frame rule — unmodified vars keep pre-state
@@ -867,6 +890,16 @@ fn infer_expr_type_for_verifier(expr: &Expr, var_types: &HashMap<String, Type>) 
             UnaryOp::Not => Some(Type::Bool),
             UnaryOp::Neg => infer_negated_expr_type_for_verifier(operand, var_types),
         },
+        Expr::Alloc { arena, value } => {
+            let arena_ty = infer_expr_type_for_verifier(arena, var_types);
+            match arena_ty {
+                Some(Type::Arena(_)) => {
+                    let val_ty = infer_expr_type_for_verifier(value, var_types)?;
+                    Some(Type::Named(format!("*{}", format_type_for_verifier(&val_ty))))
+                }
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -884,9 +917,10 @@ fn encode_body_effects<'ctx>(
     post_vars: &HashMap<String, BV<'ctx>>,
     param_types: &HashMap<String, Type>,
     signed_vars: &HashSet<String>,
+    struct_sizes: HashMap<String, usize>,
 ) -> BodyEncoding<'ctx> {
     let mut encoding =
-        BodyEncoding::new(pre_vars.clone(), param_types.clone(), signed_vars.clone());
+        BodyEncoding::new(pre_vars.clone(), param_types.clone(), signed_vars.clone(), struct_sizes);
     encode_block(ctx, solver, body, &mut encoding);
 
     // Final step: connect the last SSA value of each modified variable to post_var.
@@ -1005,6 +1039,8 @@ fn encode_block<'ctx>(
                         };
 
                         if let Some(result) = encoded {
+                            process_alloc_side_effects(value, ctx, solver, encoding);
+
                             let ssa_var = encoding.fresh_bv(ctx, &format!("{}_ssa", name));
 
                             // Assert: ssa_var == computed_result
@@ -1035,10 +1071,20 @@ fn encode_block<'ctx>(
             Stmt::Let {
                 name, ty, value, ..
             } => {
-                // Local variable: create a Z3 variable and bind it
-                if let Some(z3_val) =
+                if let Some(Type::Arena(capacity)) = ty {
+                    let offset_name = format!("{}_offset", name);
+                    let offset_val = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH);
+                    encoding.current_vars.insert(offset_name, offset_val);
+                    encoding.var_types.insert(name.clone(), Type::Arena(*capacity));
+
+                    let local_var = BV::new_const(ctx, format!("local_{}", name).as_str(), SOLVER_BV_WIDTH);
+                    solver.assert(&local_var._eq(&BV::from_i64(ctx, 0, SOLVER_BV_WIDTH)));
+                    encoding.current_vars.insert(name.clone(), local_var);
+                } else if let Some(z3_val) =
                     expr_to_z3(ctx, value, &encoding.current_vars, &encoding.signed_vars)
                 {
+                    process_alloc_side_effects(value, ctx, solver, encoding);
+
                     let local_var =
                         BV::new_const(ctx, format!("local_{}", name).as_str(), SOLVER_BV_WIDTH);
                     solver.assert(&local_var._eq(&z3_val));
@@ -1070,6 +1116,7 @@ fn encode_block<'ctx>(
                 invariants,
                 body,
             } => {
+                process_alloc_side_effects(condition, ctx, solver, encoding);
                 // Inductive loop verification:
                 // 1. Havoc all variables modified in the loop body
                 //    (replace with fresh unconstrained Z3 vars)
@@ -1219,12 +1266,14 @@ fn encode_block<'ctx>(
                 then_block,
                 else_block,
             } => {
-                if let Some(cond_z3) = condition_to_z3(
+                let cond_z3_opt = condition_to_z3(
                     ctx,
                     condition,
                     &encoding.current_vars,
                     &encoding.signed_vars,
-                ) {
+                );
+                process_alloc_side_effects(condition, ctx, solver, encoding);
+                if let Some(cond_z3) = cond_z3_opt {
                     let saved_current = encoding.current_vars.clone();
 
                     // If the condition is statically true/false, only encode the reachable branch.
@@ -1343,12 +1392,14 @@ fn encode_block<'ctx>(
                 }
             }
             Stmt::Assert { condition, message } => {
-                match condition_to_z3(
+                let cond_opt = condition_to_z3(
                     ctx,
                     condition,
                     &encoding.current_vars,
                     &encoding.signed_vars,
-                ) {
+                );
+                process_alloc_side_effects(condition, ctx, solver, encoding);
+                match cond_opt {
                     Some(cond) => {
                         solver.push();
                         solver.assert(&cond.not());
@@ -1380,23 +1431,24 @@ fn encode_block<'ctx>(
                         .push("assertion could not be encoded safely".to_string()),
                 }
             }
-            Stmt::Emit { .. } => {
-                // Emit statements have no effect on Z3 verification state.
-                // They are on-chain event markers, compiled to LOG opcodes.
+            Stmt::Emit { args, .. } => {
+                for arg in args {
+                    process_alloc_side_effects(arg, ctx, solver, encoding);
+                }
             }
-            Stmt::Expr(expr) if expr_contains_fncall(expr) => {
-                encoding.failures.push(
-                    "Function-call expression statements are not modeled by the verifier"
-                        .to_string(),
-                );
-            }
-            Stmt::Expr(_) => {
-                // Pure expression statements have no effect on the verification state.
+            Stmt::Expr(expr) => {
+                process_alloc_side_effects(expr, ctx, solver, encoding);
+                if expr_contains_fncall(expr) {
+                    encoding.failures.push(
+                        "Function-call expression statements are not modeled by the verifier"
+                            .to_string(),
+                    );
+                }
             }
             Stmt::Return(Some(expr)) => {
-                if let Some(z3_val) =
-                    expr_to_z3(ctx, expr, &encoding.current_vars, &encoding.signed_vars)
-                {
+                let z3_val_opt = expr_to_z3(ctx, expr, &encoding.current_vars, &encoding.signed_vars);
+                process_alloc_side_effects(expr, ctx, solver, encoding);
+                if let Some(z3_val) = z3_val_opt {
                     encoding.current_vars.insert("result".to_string(), z3_val);
                     encoding.modified.insert("result".to_string());
                 } else {
@@ -1760,6 +1812,14 @@ fn expr_to_z3<'ctx>(
             };
             let composite = format!("{}_{}", obj_name, field);
             vars.get(&composite).cloned()
+        }
+        Expr::Alloc { arena, value: _ } => {
+            let arena_name = match &**arena {
+                Expr::Ident(n) => n.trim().to_string(),
+                _ => return None,
+            };
+            let offset_var_name = format!("{}_offset", arena_name);
+            vars.get(&offset_var_name).cloned()
         }
         _ => None,
     }
@@ -2886,3 +2946,198 @@ fn simplify_stmt(stmt: &Stmt, constants: &HashMap<String, i128>) -> Stmt {
         Stmt::Expr(expr) => Stmt::Expr(simplify_expr(expr, constants, false)),
     }
 }
+
+fn calculate_struct_sizes(program: &Program) -> HashMap<String, usize> {
+    let mut sizes = HashMap::new();
+    let mut pending: Vec<&StructDef> = program.items.iter().filter_map(|item| match item {
+        Item::Struct(s) => Some(s),
+        _ => None,
+    }).collect();
+
+    // Fixed-point iteration
+    let mut progress = true;
+    while progress && !pending.is_empty() {
+        progress = false;
+        let mut next_pending = Vec::new();
+        for s in pending {
+            let mut size = 0;
+            let mut resolved = true;
+            for f in &s.fields {
+                if let Some(f_size) = type_size_helper(&f.ty, &sizes) {
+                    size += f_size;
+                } else {
+                    resolved = false;
+                    break;
+                }
+            }
+            if resolved {
+                sizes.insert(s.name.clone(), size);
+                progress = true;
+            } else {
+                next_pending.push(s);
+            }
+        }
+        pending = next_pending;
+    }
+    sizes
+}
+
+fn type_size_helper(ty: &Type, struct_sizes: &HashMap<String, usize>) -> Option<usize> {
+    match ty {
+        Type::U8 | Type::I8 | Type::Bool | Type::Unit => Some(1),
+        Type::U16 | Type::I16 => Some(2),
+        Type::U32 | Type::I32 => Some(4),
+        Type::U64 | Type::I64 | Type::Gas => Some(8),
+        Type::U128 | Type::I128 => Some(16),
+        Type::U256 | Type::Wallet | Type::TxHash => Some(32),
+        Type::Address => Some(20),
+        Type::Signature => Some(65),
+        Type::Named(name) => struct_sizes.get(name).cloned(),
+        _ => None, // Dynamic types are not fixed-size
+    }
+}
+
+fn verifier_type_size(ty: &Type) -> usize {
+    // This is for primitive types without struct definitions context.
+    // Struct types should be resolved via struct_sizes map which is accessible from BodyEncoding.
+    // If not found, return 8 as a safe default or fallback.
+    match ty {
+        Type::U8 | Type::I8 | Type::Bool | Type::Unit => 1,
+        Type::U16 | Type::I16 => 2,
+        Type::U32 | Type::I32 => 4,
+        Type::U64 | Type::I64 | Type::Gas => 8,
+        Type::U128 | Type::I128 => 16,
+        Type::U256 | Type::Wallet | Type::TxHash => 32,
+        Type::Address => 20,
+        Type::Signature => 65,
+        _ => 8,
+    }
+}
+
+fn format_type_for_verifier(ty: &Type) -> String {
+    match ty {
+        Type::U8 => "u8".into(),
+        Type::U16 => "u16".into(),
+        Type::U32 => "u32".into(),
+        Type::U64 => "u64".into(),
+        Type::U128 => "u128".into(),
+        Type::U256 => "u256".into(),
+        Type::I8 => "i8".into(),
+        Type::I16 => "i16".into(),
+        Type::I32 => "i32".into(),
+        Type::I64 => "i64".into(),
+        Type::I128 => "i128".into(),
+        Type::Bool => "bool".into(),
+        Type::Address => "Address".into(),
+        Type::String => "String".into(),
+        Type::Unit => "()".into(),
+        Type::Wallet => "Wallet".into(),
+        Type::Signature => "Signature".into(),
+        Type::TxHash => "TxHash".into(),
+        Type::Gas => "Gas".into(),
+        Type::Array(t) => format!("[{}]", format_type_for_verifier(t)),
+        Type::Map(k, v) => format!("Map<{}, {}>", format_type_for_verifier(k), format_type_for_verifier(v)),
+        Type::Option(t) => format!("Option<{}>", format_type_for_verifier(t)),
+        Type::Result(t, e) => format!("Result<{}, {}>", format_type_for_verifier(t), format_type_for_verifier(e)),
+        Type::Arena(size) => format!("Arena<{}>", size),
+        Type::Named(n) => n.clone(),
+    }
+}
+
+fn process_alloc_side_effects<'ctx>(
+    expr: &Expr,
+    ctx: &'ctx Context,
+    solver: &Solver<'ctx>,
+    encoding: &mut BodyEncoding<'ctx>,
+) {
+    match expr {
+        Expr::Alloc { arena, value } => {
+            process_alloc_side_effects(arena, ctx, solver, encoding);
+            process_alloc_side_effects(value, ctx, solver, encoding);
+
+            let arena_name = match arena.as_ref() {
+                Expr::Ident(n) => n.trim().to_string(),
+                _ => return,
+            };
+
+            let capacity = match encoding.var_types.get(&arena_name) {
+                Some(Type::Arena(cap)) => *cap as i64,
+                _ => return,
+            };
+
+            let value_ty = infer_expr_type_for_verifier(value, &encoding.var_types);
+            let size = match value_ty {
+                Some(Type::Named(name)) if encoding.struct_sizes.contains_key(&name) => {
+                    *encoding.struct_sizes.get(&name).unwrap() as i64
+                }
+                Some(ty) => verifier_type_size(&ty) as i64,
+                None => return,
+            };
+
+            let offset_var_name = format!("{}_offset", arena_name);
+            let current_offset = match encoding.current_vars.get(&offset_var_name).cloned() {
+                Some(val) => val,
+                None => return,
+            };
+
+            let size_bv = BV::from_i64(ctx, size, SOLVER_BV_WIDTH);
+            let cap_bv = BV::from_i64(ctx, capacity, SOLVER_BV_WIDTH);
+            let new_offset = current_offset.bvadd(&size_bv);
+            solver.push();
+            solver.assert(&new_offset.bvugt(&cap_bv));
+            match solver.check() {
+                SatResult::Sat => {
+                    encoding.failures.push(format!(
+                        "Arena allocation on '{}' can exceed capacity (potential OOM)",
+                        arena_name
+                    ));
+                }
+                SatResult::Unknown => {
+                    encoding.failures.push(format!(
+                        "Arena allocation limit verification on '{}' is undecidable",
+                        arena_name
+                    ));
+                }
+                SatResult::Unsat => {}
+            }
+            solver.pop(1);
+            solver.assert(&new_offset.bvule(&cap_bv));
+
+            let ssa_var = encoding.fresh_bv(ctx, &format!("{}_offset_ssa", arena_name));
+            solver.assert(&ssa_var._eq(&new_offset));
+
+            encoding.current_vars.insert(offset_var_name.clone(), ssa_var);
+            encoding.modified.insert(offset_var_name);
+        }
+        Expr::BinOp { left, right, .. } => {
+            process_alloc_side_effects(left, ctx, solver, encoding);
+            process_alloc_side_effects(right, ctx, solver, encoding);
+        }
+        Expr::UnaryOp { operand, .. } => {
+            process_alloc_side_effects(operand, ctx, solver, encoding);
+        }
+        Expr::FnCall { args, .. } => {
+            for arg in args {
+                process_alloc_side_effects(arg, ctx, solver, encoding);
+            }
+        }
+        Expr::MethodCall { object, args, .. } => {
+            process_alloc_side_effects(object, ctx, solver, encoding);
+            for arg in args {
+                process_alloc_side_effects(arg, ctx, solver, encoding);
+            }
+        }
+        Expr::FieldAccess { object, .. } => {
+            process_alloc_side_effects(object, ctx, solver, encoding);
+        }
+        Expr::Index { object, index } => {
+            process_alloc_side_effects(object, ctx, solver, encoding);
+            process_alloc_side_effects(index, ctx, solver, encoding);
+        }
+        Expr::If { condition, .. } => {
+            process_alloc_side_effects(condition, ctx, solver, encoding);
+        }
+        _ => {}
+    }
+}
+

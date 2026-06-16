@@ -18,6 +18,38 @@ pub fn generate_rust(program: &Program) -> String {
         out.push_str("use std::collections::HashMap;\n\n");
     }
 
+    // Detect if Arena type is used anywhere — if so, add Arena helper
+    let uses_arena = program.items.iter().any(item_uses_arena);
+    if uses_arena {
+        out.push_str("struct Arena<const N: usize> {\n");
+        out.push_str("    buffer: std::cell::RefCell<[u8; N]>,\n");
+        out.push_str("    offset: std::cell::Cell<usize>,\n");
+        out.push_str("}\n");
+        out.push_str("impl<const N: usize> Arena<N> {\n");
+        out.push_str("    #[allow(dead_code)]\n");
+        out.push_str("    fn new() -> Self {\n");
+        out.push_str("        Self {\n");
+        out.push_str("            buffer: std::cell::RefCell::new([0; N]),\n");
+        out.push_str("            offset: std::cell::Cell::new(0),\n");
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push_str("    #[allow(dead_code)]\n");
+        out.push_str("    fn alloc<T>(&self, value: T) -> *mut T {\n");
+        out.push_str("        let size = std::mem::size_of::<T>();\n");
+        out.push_str("        let current = self.offset.get();\n");
+        out.push_str("        if current + size > N {\n");
+        out.push_str("            panic!(\"Out of memory in Arena\");\n");
+        out.push_str("        }\n");
+        out.push_str("        self.offset.set(current + size);\n");
+        out.push_str("        unsafe {\n");
+        out.push_str("            let ptr = self.buffer.as_ptr().cast::<u8>().add(current).cast::<T>();\n");
+        out.push_str("            ptr.write(value);\n");
+        out.push_str("            ptr\n");
+        out.push_str("        }\n");
+        out.push_str("    }\n");
+        out.push_str("}\n\n");
+    }
+
     for item in &program.items {
         match item {
             Item::Function(f) => out.push_str(&gen_function(f)),
@@ -47,6 +79,25 @@ fn item_uses_map(item: &Item) -> bool {
                 || c.functions
                     .iter()
                     .any(|f| item_uses_map(&Item::Function(f.clone())))
+        }
+        _ => false,
+    }
+}
+
+fn item_uses_arena(item: &Item) -> bool {
+    match item {
+        Item::Function(f) => {
+            f.params.iter().any(|p| matches!(&p.ty, Type::Arena(_)))
+                || matches!(&f.return_type, Some(Type::Arena(_)))
+        }
+        Item::Struct(s) => s.fields.iter().any(|f| matches!(&f.ty, Type::Arena(_))),
+        Item::Contract(c) => {
+            c.state_vars
+                .iter()
+                .any(|sv| matches!(&sv.ty, Type::Arena(_)))
+                || c.functions
+                    .iter()
+                    .any(|f| item_uses_arena(&Item::Function(f.clone())))
         }
         _ => false,
     }
@@ -262,7 +313,14 @@ fn gen_type(ty: &Type) -> String {
         Type::Map(k, v) => format!("HashMap<{}, {}>", gen_type(k), gen_type(v)),
         Type::Option(t) => format!("Option<{}>", gen_type(t)),
         Type::Result(t, e) => format!("Result<{}, {}>", gen_type(t), gen_type(e)),
-        Type::Named(n) => n.clone(),
+        Type::Arena(size) => format!("Arena<{}>", size),
+        Type::Named(n) => {
+            if let Some(stripped) = n.strip_prefix('*') {
+                format!("*mut {}", stripped)
+            } else {
+                n.clone()
+            }
+        }
     }
 }
 
@@ -324,6 +382,9 @@ fn gen_expr(expr: &Expr) -> String {
             s.push_str(&gen_block(b, 0));
             s.push('}');
             s
+        }
+        Expr::Alloc { arena, value } => {
+            format!("{}.alloc({})", gen_expr(arena), gen_expr(value))
         }
     }
 }

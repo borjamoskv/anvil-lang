@@ -270,6 +270,9 @@ fn check_function(func: &FnDef, env: &mut TypeEnv) {
     // Check body statements
     check_block(&func.body, env, &func.name, func.return_type.as_ref());
 
+    // Check all nested expressions for valid allocations and type safety
+    check_block_exprs(&func.body, env, &func.name);
+
     // Check for potential overflow in assignments
     check_overflow_safety(func, env);
 
@@ -494,6 +497,9 @@ fn expr_contains_fncall(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_contains_fncall)
         }
         Expr::Block(block) => block_contains_fncall(block),
+        Expr::Alloc { arena, value } => {
+            expr_contains_fncall(arena) || expr_contains_fncall(value)
+        }
         _ => false,
     }
 }
@@ -551,6 +557,9 @@ fn undefined_ident(expr: &Expr, env: &TypeEnv) -> Option<String> {
                     .and_then(|block| undefined_ident_in_block(block, env))
             }),
         Expr::Block(block) => undefined_ident_in_block(block, env),
+        Expr::Alloc { arena, value } => {
+            undefined_ident(arena, env).or_else(|| undefined_ident(value, env))
+        }
         _ => None,
     }
 }
@@ -774,6 +783,19 @@ fn infer_expr_type(expr: &Expr, env: &TypeEnv) -> Option<Type> {
             let _ = name;
             None
         }
+        Expr::Alloc { arena, value } => {
+            let arena_ty = infer_expr_type(arena, env);
+            match arena_ty {
+                Some(Type::Arena(_)) => {
+                    if let Some(value_ty) = infer_expr_type(value, env) {
+                        Some(Type::Named(format!("*{}", format_type(&value_ty))))
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            }
+        }
         _ => None,
     }
 }
@@ -956,7 +978,125 @@ fn format_type(ty: &Type) -> String {
         Type::Map(k, v) => format!("Map<{}, {}>", format_type(k), format_type(v)),
         Type::Option(t) => format!("Option<{}>", format_type(t)),
         Type::Result(t, e) => format!("Result<{}, {}>", format_type(t), format_type(e)),
+        Type::Arena(size) => format!("Arena<{}>", size),
         Type::Named(n) => n.clone(),
+    }
+}
+
+fn type_is_fixed_size(ty: &Type) -> bool {
+    match ty {
+        Type::Array(_) | Type::Map(_, _) | Type::Option(_) | Type::Result(_, _) | Type::Arena(_) => false,
+        _ => true,
+    }
+}
+
+fn check_expr(expr: &Expr, env: &mut TypeEnv, location: &str) {
+    match expr {
+        Expr::Alloc { arena, value } => {
+            check_expr(arena, env, location);
+            check_expr(value, env, location);
+
+            let arena_ty = infer_expr_type(arena, env);
+            match arena_ty {
+                Some(Type::Arena(_)) => {
+                    if let Some(value_ty) = infer_expr_type(value, env) {
+                        if !type_is_fixed_size(&value_ty) {
+                            env.errors.push(TypeError {
+                                message: format!(
+                                    "Cannot allocate dynamic type '{}' on Arena",
+                                    format_type(&value_ty)
+                                ),
+                                location: location.to_string(),
+                            });
+                        }
+                    }
+                }
+                Some(other) => {
+                    env.errors.push(TypeError {
+                        message: format!(
+                            "Allocation source must be an Arena, got '{}'",
+                            format_type(&other)
+                        ),
+                        location: location.to_string(),
+                    });
+                }
+                None => {
+                    env.errors.push(TypeError {
+                        message: "Allocation source must be an Arena".to_string(),
+                        location: location.to_string(),
+                    });
+                }
+            }
+        }
+        Expr::BinOp { left, right, .. } => {
+            check_expr(left, env, location);
+            check_expr(right, env, location);
+        }
+        Expr::UnaryOp { operand, .. } => {
+            check_expr(operand, env, location);
+        }
+        Expr::FnCall { args, .. } => {
+            for arg in args {
+                check_expr(arg, env, location);
+            }
+        }
+        Expr::MethodCall { object, args, .. } => {
+            check_expr(object, env, location);
+            for arg in args {
+                check_expr(arg, env, location);
+            }
+        }
+        Expr::FieldAccess { object, .. } => {
+            check_expr(object, env, location);
+        }
+        Expr::Index { object, index } => {
+            check_expr(object, env, location);
+            check_expr(index, env, location);
+        }
+        Expr::If { condition, then_block, else_block } => {
+            check_expr(condition, env, location);
+            check_block_exprs(then_block, env, location);
+            if let Some(eb) = else_block {
+                check_block_exprs(eb, env, location);
+            }
+        }
+        Expr::Block(block) => {
+            check_block_exprs(block, env, location);
+        }
+        _ => {}
+    }
+}
+
+fn check_block_exprs(block: &Block, env: &mut TypeEnv, location: &str) {
+    for stmt in &block.stmts {
+        match stmt {
+            Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::Ghost { value, .. } => {
+                check_expr(value, env, location);
+            }
+            Stmt::Return(Some(expr)) | Stmt::Assert { condition: expr, .. } => {
+                check_expr(expr, env, location);
+            }
+            Stmt::If { condition, then_block, else_block } => {
+                check_expr(condition, env, location);
+                check_block_exprs(then_block, env, location);
+                if let Some(eb) = else_block {
+                    check_block_exprs(eb, env, location);
+                }
+            }
+            Stmt::While { condition, body, .. } => {
+                check_expr(condition, env, location);
+                check_block_exprs(body, env, location);
+            }
+            Stmt::Emit { args, .. } => {
+                for arg in args {
+                    check_expr(arg, env, location);
+                }
+            }
+            Stmt::Expr(expr) => {
+                check_expr(expr, env, location);
+            }
+            _ => {}
+        }
     }
 }
 

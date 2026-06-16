@@ -1,0 +1,14 @@
+// ============================================================
+// ARENA ALLOC SAFE — Compile-time Verified Arena Memory Model (Safe)
+// ============================================================
+
+// SAFE: Allocations fit within the 2-byte arena capacity.
+fn test_alloc_safe(mut arena: Arena<2>) -> u64
+    where {
+        1 == 1
+    }
+{
+    let p1 = alloc(arena, 42); // 1 byte (u8)
+    let p2 = alloc(arena, 100); // 1 byte (u8)
+    return 1;
+}

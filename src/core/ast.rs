@@ -174,6 +174,7 @@ pub enum Type {
     Map(Box<Type>, Box<Type>),
     Option(Box<Type>),
     Result(Box<Type>, Box<Type>),
+    Arena(usize),
     Named(std::string::String),
 }
 
@@ -219,6 +220,10 @@ pub enum Expr {
         else_block: Option<Block>,
     },
     Block(Block),
+    Alloc {
+        arena: Box<Expr>,
+        value: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]

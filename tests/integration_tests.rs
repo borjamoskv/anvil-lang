@@ -261,6 +261,8 @@ parse_test!(parse_k2_mempool_bandit, "k2_mempool_bandit_strike.anv");
 parse_test!(parse_firedancer, "firedancer_ghosting_strike.anv");
 parse_test!(parse_uniswap_ingested, "uniswap_ingested.anv");
 parse_test!(parse_vacuous, "vacuous.anv");
+parse_test!(parse_arena_alloc, "arena_alloc.anv");
+parse_test!(parse_arena_alloc_safe, "arena_alloc_safe.anv");
 
 // ============================================================
 // PHASE B: Full Pipeline — Verification Result Tests
@@ -317,6 +319,17 @@ fn verify_reentrancy_rejected() {
 }
 
 // --- Mixed files: some functions proven, some rejected ---
+
+#[test]
+fn verify_arena_alloc_mixed() {
+    let (success, output) = run_anvil_check("arena_alloc.anv");
+    assert!(!success, "arena_alloc.anv verification should fail: {}", output);
+    assert!(
+        output.contains("can exceed capacity") || output.contains("OOM"),
+        "Expected OOM error message: {}",
+        output
+    );
+}
 
 #[test]
 fn verify_token_mixed() {
@@ -471,6 +484,24 @@ fn build_safe_transfer_rust() {
 fn build_hello_rust() {
     let (success, output) = run_anvil_build("hello.anv", "rust");
     assert!(success, "hello.anv should build to Rust: {}", output);
+}
+
+#[test]
+fn build_arena_alloc_rust() {
+    let (success, output) = run_anvil_build("arena_alloc_safe.anv", "rust");
+    assert!(success, "arena_alloc_safe.anv should build to Rust: {}", output);
+}
+
+#[test]
+fn build_arena_alloc_llvm() {
+    let (success, output) = run_anvil_build("arena_alloc_safe.anv", "llvm");
+    assert!(success, "arena_alloc_safe.anv should build to LLVM: {}", output);
+}
+
+#[test]
+fn build_arena_alloc_silicon() {
+    let (success, output) = run_anvil_build("arena_alloc_safe.anv", "silicon");
+    assert!(success, "arena_alloc_safe.anv should build to Silicon: {}", output);
 }
 
 // ============================================================

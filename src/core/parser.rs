@@ -150,6 +150,12 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type, String> {
             let err_ty = parse_type(inners.next().unwrap())?;
             Ok(Type::Result(Box::new(ok_ty), Box::new(err_ty)))
         }
+        Rule::arena_type => {
+            let mut inners = inner.into_inner();
+            let size_str = inners.next().unwrap().as_str();
+            let size = size_str.parse::<usize>().map_err(|e| format!("Invalid arena size: {}", e))?;
+            Ok(Type::Arena(size))
+        }
         _ => Ok(Type::Unit),
     }
 }
@@ -813,6 +819,17 @@ fn parse_primary(pair: pest::iterators::Pair<Rule>) -> Result<Expr, String> {
         Rule::paren_expr => {
             let inner = pair.into_inner().next().unwrap();
             parse_expr(inner)
+        }
+        Rule::alloc_expr => {
+            let mut inners = pair.into_inner();
+            let arena_pair = inners.next().unwrap();
+            let value_pair = inners.next().unwrap();
+            let arena = parse_expr(arena_pair)?;
+            let value = parse_expr(value_pair)?;
+            Ok(Expr::Alloc {
+                arena: Box::new(arena),
+                value: Box::new(value),
+            })
         }
         Rule::fn_call => {
             let mut inners = pair.into_inner();

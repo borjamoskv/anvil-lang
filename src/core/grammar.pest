@@ -85,7 +85,7 @@ invariant_block = {
 }
 
 // --- Types ---
-type_expr = { array_type | map_type | option_type | result_type | base_type }
+type_expr = { array_type | map_type | option_type | result_type | arena_type | base_type }
 
 base_type   = { "u8" | "u16" | "u32" | "u64" | "u128" | "u256"
               | "i8" | "i16" | "i32" | "i64" | "i128"
@@ -97,6 +97,7 @@ array_type  = { "[" ~ type_expr ~ "]" }
 map_type    = { "Map" ~ "<" ~ type_expr ~ "," ~ type_expr ~ ">" }
 option_type = { "Option" ~ "<" ~ type_expr ~ ">" }
 result_type = { "Result" ~ "<" ~ type_expr ~ "," ~ type_expr ~ ">" }
+arena_type  = { "Arena" ~ "<" ~ num_lit ~ ">" }
 
 // --- Struct Definition ---
 struct_def = {
@@ -139,9 +140,10 @@ unary = _{ neg | not | primary }
 neg   =  { "-" ~ primary }
 not   =  { "!" ~ primary }
 
-primary = _{ literal | paren_expr | fn_call | field_access | ident_expr }
+primary = _{ literal | paren_expr | alloc_expr | fn_call | field_access | ident_expr }
 
 paren_expr   = { "(" ~ expr ~ ")" }
+alloc_expr   = { "alloc" ~ "(" ~ expr ~ "," ~ expr ~ ")" }
 fn_call      = { (ident ~ "." ~ ident | ident) ~ "(" ~ arg_list? ~ ")" }
 field_access = { ident ~ ("." ~ ident)+ }
 ident_expr   = { ident_post }
