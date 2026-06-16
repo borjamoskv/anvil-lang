@@ -124,6 +124,26 @@ fn verify(signer: Wallet, hash: TxHash, sig: Signature, gas: Gas) -> bool
 }
 ```
 
+### Arena Memory Model & Compile-Time OOM Prevention
+
+```anvil
+fn test_alloc_safe(mut arena: Arena<2>) -> u64
+    where {
+        1 == 1
+    }
+{
+    let p1 = alloc(arena, 42);   // 1 byte (u8)
+    let p2 = alloc(arena, 100);  // 1 byte (u8)
+    return 1;
+}
+```
+
+Provides hardware-deterministic, zero-overhead memory management:
+- **`Arena<N>` Type** — Declares a fixed-size register-backed memory arena of `N` bytes.
+- **`alloc(arena, value)`** — Lowers to O(1) static pointer offset computations.
+- **Compile-Time OOM Prevention** — Z3 tracks offset shifts and proves bounds limits (`offset + size <= capacity`). Any potential OOM violation aborts compilation.
+- **Hardware-Direct Synthesis** — Lowered to stack-allocated memory arrays in LLVM IR and register arrays in Verilog (`reg [7:0] memory [0:N-1]`).
+
 ## Examples
 
 | File | Description | Expected |
@@ -136,6 +156,7 @@ fn verify(signer: Wallet, hash: TxHash, sig: Signature, gas: Gas) -> bool
 | `ssa.anv` | Sequential assignments (SSA) | ✅/✅/✅/❌ (broken sequence caught) |
 | `loops.anv` | Mathematical proofs (3-way conservation) | ✅/✅/✅/❌/❌ |
 | `while_loops.anv` | While loops with inductive invariants | ✅/✅/❌ (broken countdown caught) |
+| `arena_alloc.anv` | Arena allocation bounds & compile-time OOM | ✅/❌ (OOM allocation rejected) |
 
 ## Status
 
@@ -161,9 +182,9 @@ fn verify(signer: Wallet, hash: TxHash, sig: Signature, gas: Gas) -> bool
 - [x] **`emit` Statement** (on-chain events)
 - [x] **Quantifier Translation** (`forall`/`exists` → Z3)
 - [x] **On-Chain Standard Library** (`std/onchain.anv`)
+- [x] **Arena memory model** (O(1) tensor-state + hardware synthesis)
 - [ ] LSP / Editor support
 - [ ] Macro system (compile-time metaprogramming)
-- [ ] Arena memory model (O(1) tensor-state)
 
 ## The Thermodynamic Thesis
 
