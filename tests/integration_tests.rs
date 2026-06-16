@@ -1730,3 +1730,111 @@ fn nested_typecheck(x: u64) -> u64
     assert_eq!(json["status"], "TYPE_ERROR");
     assert_eq!(json["errors"][0]["source"], "typechecker");
 }
+
+#[test]
+fn test_saas_build_endpoint_via_cli() {
+    let _guard = anvil_cli_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let binary = anvil_binary();
+
+    let port = "18482";
+    let health_url = format!("http://127.0.0.1:{}/health", port);
+    let build_url = format!("http://127.0.0.1:{}/v1/build", port);
+
+    // Add key for authorization
+    let mut key_cmd = Command::new(&binary);
+    key_cmd.args([
+        "keys",
+        "add",
+        "--key",
+        "testkey",
+        "--owner",
+        "testowner",
+        "--tier",
+        "SOVEREIGN",
+    ]);
+    let key_output = key_cmd.output().expect("Failed to add key");
+    assert!(
+        key_output.status.success()
+            || String::from_utf8_lossy(&key_output.stderr).contains("UNIQUE constraint failed")
+    );
+
+    // Start SaaS server
+    let mut saas_cmd = Command::new(&binary);
+    saas_cmd.args(["saas", "--port", port]);
+    let mut child = saas_cmd.spawn().expect("Failed to spawn saas server");
+
+    // Poll health check
+    let mut online = false;
+    for _ in 0..40 {
+        let mut curl_cmd = Command::new("curl");
+        curl_cmd.args(["-s", "-o", "/dev/null", "-w", "%{http_code}", &health_url]);
+        if let Ok(output) = curl_cmd.output() {
+            let status = String::from_utf8_lossy(&output.stdout);
+            if status.trim() == "200" {
+                online = true;
+                break;
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+
+    if !online {
+        let _ = child.kill();
+        let _ = child.wait();
+        panic!("SaaS server failed to start within timeout");
+    }
+
+    // Call build endpoint
+    let request_body = serde_json::json!({
+        "source_code": "fn test(a: u64) -> u64 where { a' == a } { return a; }",
+        "target": "silicon"
+    });
+
+    let mut curl_cmd = Command::new("curl");
+    curl_cmd.args([
+        "-s",
+        "-X",
+        "POST",
+        "-H",
+        "Content-Type: application/json",
+        "-H",
+        "x-exergy-key: testkey",
+        "-d",
+        &request_body.to_string(),
+        &build_url,
+    ]);
+
+    let build_output = curl_cmd
+        .output()
+        .expect("Failed to execute curl post to build");
+
+    let _ = child.kill();
+    let _ = child.wait();
+
+    assert!(build_output.status.success(), "curl failed");
+    let response_str = String::from_utf8_lossy(&build_output.stdout).to_string();
+    let response_json: serde_json::Value =
+        serde_json::from_str(&response_str).unwrap_or_else(|e| {
+            panic!(
+                "Failed to parse JSON response: {}\nError: {}",
+                response_str, e
+            )
+        });
+
+    assert_eq!(
+        response_json["status"], "VERIFIED",
+        "Build not verified: {}",
+        response_str
+    );
+    assert!(
+        response_json["output_code"].as_str().is_some(),
+        "output_code missing: {}",
+        response_str
+    );
+    let code = response_json["output_code"].as_str().unwrap();
+    assert!(
+        code.contains("module test"),
+        "verilog code does not contain module test: {}",
+        code
+    );
+}

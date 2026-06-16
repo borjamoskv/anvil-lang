@@ -16,6 +16,8 @@ use tracing::{Instrument, error, info, info_span};
 
 use crate::core::parser;
 use crate::core::typechecker;
+use crate::engine::codegen;
+use crate::engine::llvm_ir;
 use crate::engine::verifier;
 use sqlx::sqlite::SqlitePool;
 
@@ -75,6 +77,7 @@ pub async fn start_server(port: u16) {
         .route("/", get(serve_portal))
         .route("/health", get(health_check))
         .route("/v1/verify", post(verify_contract))
+        .route("/v1/build", post(build_contract))
         .route("/v1/auth/validate", post(validate_key))
         .route(
             "/api/provenance/:metric_id",
@@ -459,4 +462,202 @@ pub async fn check_key_validity(pool: &SqlitePool, key: &str) -> Result<bool, sq
     .fetch_optional(pool)
     .await
     .map(|r| r.is_some())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BuildContractRequest {
+    pub source_code: String,
+    pub target: String,
+}
+
+#[derive(Serialize)]
+pub struct BuildContractResponse {
+    pub status: String,
+    pub message: String,
+    pub output_code: Option<String>,
+    pub timestamp: String,
+}
+
+async fn build_contract(
+    State(state): State<AppState>,
+    request: Request<Body>,
+) -> impl IntoResponse {
+    counter!("anvil_build_requests_total").increment(1);
+
+    // --- SOVEREIGN SHIELD (Ω₉ ENFORCEMENT) ---
+    match headers_authorized(&state.pool, request.headers()).await {
+        Ok(true) => {}
+        Ok(false) => {
+            error!("Authorization required for /v1/build");
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(BuildContractResponse {
+                    status: "AUTHORIZATION_REQUIRED".to_string(),
+                    message: "Every /v1/build request requires a valid x-exergy-key.".to_string(),
+                    output_code: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                }),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            error!(error = %e, "Auth backend unavailable for /v1/build");
+            return (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(BuildContractResponse {
+                    status: "AUTH_BACKEND_UNAVAILABLE".to_string(),
+                    message: "Authentication backend is unavailable. Build was not run."
+                        .to_string(),
+                    output_code: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                }),
+            )
+                .into_response();
+        }
+    }
+
+    if !is_json_content_type(request.headers()) {
+        return (
+            StatusCode::UNSUPPORTED_MEDIA_TYPE,
+            Json(BuildContractResponse {
+                status: "REJECTED".to_string(),
+                message: "Unsupported Media Type: expected application/json.".to_string(),
+                output_code: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            }),
+        )
+            .into_response();
+    }
+
+    let body = match to_bytes(request.into_body(), MAX_JSON_BODY_BYTES).await {
+        Ok(body) => body,
+        Err(e) => {
+            counter!("anvil_build_result", "status" => "rejected", "reason" => "payload_too_large")
+                .increment(1);
+            error!(error = %e, limit_bytes = MAX_JSON_BODY_BYTES, "Build request rejected: JSON body too large");
+            return (
+                StatusCode::PAYLOAD_TOO_LARGE,
+                Json(BuildContractResponse {
+                    status: "PAYLOAD_TOO_LARGE".to_string(),
+                    message: "Payload Too Large: request body exceeds the 50KB source limit plus JSON envelope allowance.".to_string(),
+                    output_code: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let payload: BuildContractRequest = match serde_json::from_slice(&body) {
+        Ok(payload) => payload,
+        Err(e) => {
+            counter!("anvil_build_result", "status" => "rejected", "reason" => "invalid_json")
+                .increment(1);
+            error!(error = %e, "Invalid JSON in build request");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(BuildContractResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!("Invalid JSON: {}", e),
+                    output_code: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                }),
+            )
+                .into_response();
+        }
+    };
+
+    let source_bytes = payload.source_code.len();
+    let span = info_span!("build_contract", source_len = source_bytes, target = %payload.target);
+
+    if source_bytes > MAX_SOURCE_BYTES {
+        counter!("anvil_build_result", "status" => "rejected", "reason" => "payload_too_large")
+            .increment(1);
+        error!(
+            source_bytes = source_bytes,
+            limit_bytes = MAX_SOURCE_BYTES,
+            "Build request rejected: source payload too large"
+        );
+        return (
+            StatusCode::PAYLOAD_TOO_LARGE,
+            Json(BuildContractResponse {
+                status: "PAYLOAD_TOO_LARGE".to_string(),
+                message: "Payload Too Large: source_code exceeds the 50KB strict limit."
+                    .to_string(),
+                output_code: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            }),
+        )
+            .into_response();
+    }
+
+    async move {
+        let start = std::time::Instant::now();
+
+        // 1. Parse
+        let program = match parser::parse_program(&payload.source_code) {
+            Ok(p) => p,
+            Err(e) => {
+                counter!("anvil_build_result", "status" => "rejected", "reason" => "parse_error").increment(1);
+                error!(error = %e, "Parse error in build request");
+                return (StatusCode::UNPROCESSABLE_ENTITY, Json(BuildContractResponse {
+                    status: "REJECTED".to_string(),
+                    message: format!("Parse Error: {}", e),
+                    output_code: None,
+                    timestamp: chrono::Utc::now().to_rfc3339(),
+                })).into_response();
+            }
+        };
+
+        // 2. Type Check
+        let type_env = typechecker::check_program(&program);
+        if !type_env.errors.is_empty() {
+            counter!("anvil_build_result", "status" => "rejected", "reason" => "type_error").increment(1);
+            error!(errors = type_env.errors.len(), "Type check failed in build request");
+            return (StatusCode::UNPROCESSABLE_ENTITY, Json(BuildContractResponse {
+                status: "REJECTED".to_string(),
+                message: "Type Check Error: Mismatched types or undefined variables.".to_string(),
+                output_code: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            })).into_response();
+        }
+
+        // 3. Verify with Z3
+        let results = verifier::verify_program(&program, &type_env);
+        let all_ok = !results.is_empty() && results.iter().all(|r| r.verified);
+
+        if !all_ok {
+            counter!("anvil_build_result", "status" => "rejected", "reason" => "verification_failed").increment(1);
+            info!("Build rejected: invariants not provable");
+            return (StatusCode::UNPROCESSABLE_ENTITY, Json(BuildContractResponse {
+                status: "REJECTED".to_string(),
+                message: "Build Failed: Invariants could not be proven mathematically. Transpilation aborted.".to_string(),
+                output_code: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            })).into_response();
+        }
+
+        // 4. Generate Target Code (Rust, LLVM, or Silicon)
+        let output_code = match payload.target.as_str() {
+            "llvm" => llvm_ir::generate_llvm_ir(&program),
+            "silicon" => crate::singularity::synthesize_ast_to_verilog(&program),
+            _ => codegen::generate_rust(&program),
+        };
+
+        counter!("anvil_build_result", "status" => "verified").increment(1);
+        let duration = start.elapsed().as_secs_f64();
+        info!(
+            duration_ms = duration * 1000.0,
+            target = %payload.target,
+            "Build successful — contract compiled"
+        );
+
+        Json(BuildContractResponse {
+            status: "VERIFIED".to_string(),
+            message: format!("Code proven. Successfully transpiled to {}.", payload.target),
+            output_code: Some(output_code),
+            timestamp: chrono::Utc::now().to_rfc3339(),
+        }).into_response()
+    }.instrument(span).await
 }

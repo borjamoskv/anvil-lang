@@ -462,7 +462,17 @@
 }</textarea>
             <div class="panel-footer">
                 <div class="char-count" id="char-count">0 chars</div>
-                <button id="verify-btn" onclick="submitVerification()">⊢ Verify</button>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <select id="target-select" aria-label="Build Target"
+                        style="background: var(--bg); border: 1px solid var(--border); color: var(--text); padding: 0.5rem; font-family: var(--mono); font-size: 0.8rem; outline: none; cursor: pointer;">
+                        <option value="rust">Rust</option>
+                        <option value="llvm">LLVM IR</option>
+                        <option value="silicon">Silicon (Verilog)</option>
+                    </select>
+                    <button id="verify-btn" onclick="submitVerification()">⊢ Verify</button>
+                    <button id="build-btn" onclick="submitBuild()"
+                        style="background: var(--bg-3); border: 1px solid var(--border); color: var(--accent-light); padding: 0.65rem 1.25rem; font-family: var(--mono); font-size: 0.85rem; letter-spacing: 1px; text-transform: uppercase; cursor: pointer; transition: all 0.15s;">🛠 Build</button>
+                </div>
             </div>
         </div>
 
@@ -798,6 +808,90 @@ The invariants hold universally over the state space.</span>`;
         } finally {
             btn.disabled = false;
             btn.innerHTML = '⊢ Verify';
+        }
+    }
+
+    async function submitBuild() {
+        const btn = document.getElementById('build-btn');
+        const targetSelect = document.getElementById('target-select');
+        const rawCode = textarea.value;
+        const code = rawCode.trim();
+        const target = targetSelect.value;
+        const sourceBytes = new TextEncoder().encode(rawCode).length;
+        const resultPanel = document.getElementById('result-panel');
+        const resultContent = document.getElementById('result-content');
+        const resultTitle = document.getElementById('result-title');
+
+        if (!code) return;
+        if (sourceBytes > MAX_SOURCE_BYTES) {
+            resultPanel.style.display = 'block';
+            resultTitle.textContent = '✗ PAYLOAD TOO LARGE';
+            resultContent.innerHTML =
+	`<span class="result-rejected">STATUS  : PAYLOAD_TOO_LARGE</span>
+	<span class="result-muted">MESSAGE : source_code exceeds the 50KB strict limit.</span>
+	<span class="result-muted">SIZE    : ${escapeHtml(sourceBytes)} bytes</span>`;
+            return;
+        }
+
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner"></span>BUILDING...';
+        resultPanel.style.display = 'none';
+
+        try {
+            const headers = { 'Content-Type': 'application/json' };
+            const key = keyInput.value.trim();
+            if (key) {
+                headers['x-exergy-key'] = key;
+            }
+
+            const response = await fetch('/v1/build', {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ source_code: rawCode, target: target })
+            });
+
+            const raw = await response.text();
+            let data;
+            try {
+                data = JSON.parse(raw);
+            } catch {
+                data = {
+                    status: `HTTP_${response.status}`,
+                    message: raw || response.statusText,
+                    timestamp: new Date().toISOString(),
+                    output_code: null
+                };
+            }
+            resultPanel.style.display = 'block';
+
+            if (data.status === 'VERIFIED') {
+                resultTitle.textContent = `✓ COMPILED — ${target.toUpperCase()} Artifact`;
+                resultContent.innerHTML =
+	`<span class="result-verified">STATUS  : ${escapeHtml(data.status)}</span>
+	<span class="result-muted">MESSAGE : ${escapeHtml(data.message)}</span>
+	<span class="result-muted">TIME    : ${escapeHtml(data.timestamp)}</span>
+
+	<span class="result-muted">─── GENERATED ${target.toUpperCase()} CODE ──────────────────</span>
+	<pre style="margin-top: 1rem; color: #fff; background: var(--bg-3); padding: 1rem; border: 1px solid var(--border); overflow-x: auto; max-height: 400px; font-family: var(--mono); font-size: 0.8rem; text-align: left;">${escapeHtml(data.output_code)}</pre>
+	<span class="result-muted">────────────────────────────────────────────────</span>`;
+            } else {
+                resultTitle.textContent = response.ok
+                    ? '✗ REJECTED — Invariants Not Proven'
+                    : `✗ ${data.status || `HTTP_${response.status}`}`;
+                resultContent.innerHTML =
+	`<span class="result-rejected">STATUS  : ${escapeHtml(data.status || `HTTP_${response.status}`)}</span>
+	<span class="result-muted">MESSAGE : ${escapeHtml(data.message || response.statusText)}</span>
+	<span class="result-muted">TIME    : ${escapeHtml(data.timestamp || new Date().toISOString())}</span>`;
+            }
+
+        } catch (e) {
+            resultPanel.style.display = 'block';
+            resultTitle.textContent = '✗ CONNECTION ERROR';
+            resultContent.innerHTML =
+	`<span class="result-rejected">ERROR: ${escapeHtml(e.message)}</span>`;
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '🛠 Build';
         }
     }
 </script>
