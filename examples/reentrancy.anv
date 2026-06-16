@@ -34,7 +34,7 @@ fn withdraw_broken(balance: u64, amount: u64) -> u64
 // This one MUST pass verification.
 // ============================================================
 
-fn withdraw_safe(balance: u64, amount: u64) -> u64
+fn withdraw_safe(mut balance: u64, amount: u64) -> u64
     where {
         amount > 0,
         balance >= amount,

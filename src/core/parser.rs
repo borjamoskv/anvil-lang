@@ -84,17 +84,12 @@ fn parse_param_list(pair: pest::iterators::Pair<Rule>) -> Result<Vec<Param>, Str
 fn parse_param(pair: pest::iterators::Pair<Rule>) -> Result<Param, String> {
     let mut name = String::new();
     let mut ty = Type::Unit;
-    let mut is_mut = false;
+    let is_mut = pair.as_str().trim_start().starts_with("mut");
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::ident => {
-                let s = inner.as_str();
-                if s == "mut" {
-                    is_mut = true;
-                } else {
-                    name = s.to_string();
-                }
+                name = inner.as_str().to_string();
             }
             Rule::type_expr => ty = parse_type(inner)?,
             _ => {}
@@ -578,18 +573,20 @@ fn parse_block(pair: pest::iterators::Pair<Rule>) -> Result<Block, String> {
 fn parse_let_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
     let mut name = String::new();
     let mut ty = None;
-    let mut is_mut = false;
+    let is_mut = {
+        let trimmed = pair.as_str().trim_start();
+        if trimmed.starts_with("let") {
+            trimmed[3..].trim_start().starts_with("mut")
+        } else {
+            false
+        }
+    };
     let mut value = Expr::IntLit(0);
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::ident => {
-                let s = inner.as_str();
-                if s == "mut" {
-                    is_mut = true;
-                } else {
-                    name = s.to_string();
-                }
+                name = inner.as_str().to_string();
             }
             Rule::type_expr => ty = Some(parse_type(inner)?),
             Rule::expr => value = parse_expr(inner)?,

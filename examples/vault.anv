@@ -10,7 +10,7 @@
 
 // Deposit: assets in, shares out (1:1 for simplicity)
 // The invariant uses || to express: "either nothing exists, or assets back shares"
-fn deposit(total_supply: u64, total_assets: u64, amount: u64) -> u64
+fn deposit(mut total_supply: u64, mut total_assets: u64, amount: u64) -> u64
     where {
         amount > 0,
         total_supply' == total_supply + amount,
@@ -24,7 +24,7 @@ fn deposit(total_supply: u64, total_assets: u64, amount: u64) -> u64
 
 // Withdraw with combined logical invariant:
 // shares > 0 AND supply >= shares AND assets >= shares
-fn withdraw(total_supply: u64, total_assets: u64, shares: u64) -> u64
+fn withdraw(mut total_supply: u64, mut total_assets: u64, shares: u64) -> u64
     where {
         shares > 0 && total_supply >= shares && total_assets >= shares,
         total_supply' == total_supply - shares,
@@ -54,7 +54,7 @@ fn check_solvency(total_supply: u64, total_assets: u64) -> u64
 // Anvil MUST reject this.
 // ============================================================
 
-fn withdraw_broken(total_supply: u64, total_assets: u64, shares: u64) -> u64
+fn withdraw_broken(total_supply: u64, mut total_assets: u64, shares: u64) -> u64
     where {
         shares > 0 && total_supply >= shares && total_assets >= shares,
         total_supply' == total_supply - shares,
@@ -74,7 +74,7 @@ fn withdraw_broken(total_supply: u64, total_assets: u64, shares: u64) -> u64
 // Anvil's global conservation invariant MUST reject this.
 // ============================================================
 
-fn donation_inflation(total_supply: u64, total_assets: u64, donation: u64, shares: u64) -> u64
+fn donation_inflation(total_supply: u64, mut total_assets: u64, donation: u64, shares: u64) -> u64
     where {
         donation > 0 && shares > 0 && total_supply >= shares && total_assets + donation >= shares,
         total_supply' == total_supply - shares,

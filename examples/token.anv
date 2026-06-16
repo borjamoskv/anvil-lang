@@ -24,7 +24,7 @@ contract Token {
     }
 
     // Transfer between accounts: MUST preserve total_supply
-    pub fn transfer(owner_balance: u64, user_balance: u64, total_supply: u64, amount: u64) -> u64
+    pub fn transfer(mut owner_balance: u64, mut user_balance: u64, total_supply: u64, amount: u64) -> u64
         where {
             amount > 0,
             owner_balance >= amount,
@@ -39,7 +39,7 @@ contract Token {
     }
 
     // Mint: creates new tokens (increases total_supply)
-    pub fn mint(owner_balance: u64, user_balance: u64, total_supply: u64, amount: u64) -> u64
+    pub fn mint(mut owner_balance: u64, user_balance: u64, mut total_supply: u64, amount: u64) -> u64
         where {
             amount > 0,
             owner_balance' == owner_balance + amount,
@@ -71,7 +71,7 @@ contract BrokenToken {
     // Contract invariant will be violated:
     // owner' = owner + amount, but supply' = supply
     // → owner' + user' != supply'
-    pub fn mint_broken(owner_balance: u64, user_balance: u64, total_supply: u64, amount: u64) -> u64
+    pub fn mint_broken(mut owner_balance: u64, user_balance: u64, total_supply: u64, amount: u64) -> u64
         where {
             amount > 0,
             owner_balance' == owner_balance + amount,

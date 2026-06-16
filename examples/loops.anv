@@ -8,7 +8,7 @@
 
 // Multiplication as repeated addition:
 // total' = total + amount * count
-fn accumulate(total: u64, amount: u64, count: u64) -> u64
+fn accumulate(mut total: u64, amount: u64, count: u64) -> u64
     where {
         amount > 0,
         count > 0,
@@ -20,7 +20,7 @@ fn accumulate(total: u64, amount: u64, count: u64) -> u64
 }
 
 // Linear scaling: double both sides of a balance
-fn double_balance(balance: u64, supply: u64) -> u64
+fn double_balance(mut balance: u64, mut supply: u64) -> u64
     where {
         balance > 0,
         supply > 0,
@@ -35,7 +35,7 @@ fn double_balance(balance: u64, supply: u64) -> u64
 
 // Conservation across three accounts:
 // Moving funds from A through B to C preserves total
-fn three_way_transfer(a: u64, b: u64, c: u64, amount: u64) -> u64
+fn three_way_transfer(mut a: u64, b: u64, mut c: u64, amount: u64) -> u64
     where {
         amount > 0,
         a >= amount,
@@ -55,7 +55,7 @@ fn three_way_transfer(a: u64, b: u64, c: u64, amount: u64) -> u64
 // Counterexample: amount=1, count=2 → total'=1, should be 2
 // ============================================================
 
-fn accumulate_broken(total: u64, amount: u64, count: u64) -> u64
+fn accumulate_broken(mut total: u64, amount: u64, count: u64) -> u64
     where {
         amount > 0,
         count > 0,
@@ -71,7 +71,7 @@ fn accumulate_broken(total: u64, amount: u64, count: u64) -> u64
 // BROKEN: Three-way transfer that forgets conservation
 // ============================================================
 
-fn three_way_broken(a: u64, b: u64, c: u64, amount: u64) -> u64
+fn three_way_broken(mut a: u64, mut b: u64, c: u64, amount: u64) -> u64
     where {
         amount > 0,
         a >= amount,

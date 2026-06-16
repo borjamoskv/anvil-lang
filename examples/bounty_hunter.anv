@@ -10,7 +10,7 @@
 // ============================================================
 
 // Función de préstamo sana.
-fn borrow(pool_liquidity: u64, total_borrows: u64, amount: u64) -> u64
+fn borrow(pool_liquidity: u64, mut total_borrows: u64, amount: u64) -> u64
     where {
         amount > 0,
         pool_liquidity >= total_borrows + amount,
@@ -28,7 +28,7 @@ fn borrow(pool_liquidity: u64, total_borrows: u64, amount: u64) -> u64
 // Función vulnerable de liquidación
 // Un error lógico permite al liquidador retirar colateral sin
 // reducir la deuda total correspondiente, rompiendo la solvencia.
-fn liquidate_vulnerable(pool_liquidity: u64, total_borrows: u64, repay_amount: u64) -> u64
+fn liquidate_vulnerable(mut pool_liquidity: u64, total_borrows: u64, repay_amount: u64) -> u64
     where {
         repay_amount > 0,
         pool_liquidity >= total_borrows,

@@ -16,7 +16,7 @@ fn single_liquidation(
     debt: u256,
     close_factor: u256,
     debt_to_cover: u256,
-    total_liquidated: u256
+    mut total_liquidated: u256
 ) -> u256
 where {
     // Preconditions (protocol state)
@@ -46,7 +46,7 @@ fn double_liquidation_bypass(
     close_factor: u256,
     first_call: u256,
     second_call: u256,
-    total_liquidated: u256
+    mut total_liquidated: u256
 ) -> u256
 where {
     // Preconditions
@@ -81,7 +81,7 @@ fn self_liquidation_drain(
     liquidation_bonus: u256,
     close_factor: u256,
     seized: u256,
-    borrower_net: u256
+    mut borrower_net: u256
 ) -> u256
 where {
     // Protocol state
@@ -120,7 +120,7 @@ where {
 fn iterative_drain_convergence(
     initial_debt: u256,
     remaining_after_5: u256,
-    total_drained: u256
+    mut total_drained: u256
 ) -> u256
 where {
     initial_debt > 0,

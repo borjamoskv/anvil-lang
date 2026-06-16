@@ -40,7 +40,7 @@ contract StressTestEngine {
     }
 
     // 2. MATHEMATICAL CONSERVATION (Hoare Logic Stress)
-    fn flash_loan_arbitrage(reserves: u64, flash_amount: u64, fee: u64) -> u64
+    fn flash_loan_arbitrage(mut reserves: u64, flash_amount: u64, fee: u64) -> u64
         where {
             flash_amount > 0,
             reserves >= flash_amount,

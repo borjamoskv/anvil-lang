@@ -25,6 +25,8 @@ pub struct TypeEnv {
     /// Warnings (non-fatal, informational)
     pub warnings: Vec<TypeWarning>,
     pub structs: HashMap<String, StructDef>,
+    mutability: HashMap<String, bool>,
+    mutability_scopes: Vec<HashMap<String, bool>>,
 }
 
 #[derive(Debug, Clone)]
@@ -64,15 +66,26 @@ impl TypeEnv {
             errors: Vec::new(),
             warnings: Vec::new(),
             structs: HashMap::new(),
+            mutability: HashMap::new(),
+            mutability_scopes: Vec::new(),
+        }
+    }
+
+    pub fn bind_mut(&mut self, name: String, ty: Type, is_mut: bool) {
+        if let Some(scope) = self.scopes.last_mut() {
+            scope.insert(name.clone(), ty);
+        } else {
+            self.bindings.insert(name.clone(), ty);
+        }
+        if let Some(mut_scope) = self.mutability_scopes.last_mut() {
+            mut_scope.insert(name, is_mut);
+        } else {
+            self.mutability.insert(name, is_mut);
         }
     }
 
     pub fn bind(&mut self, name: String, ty: Type) {
-        if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name, ty);
-        } else {
-            self.bindings.insert(name, ty);
-        }
+        self.bind_mut(name, ty, false);
     }
 
     pub fn lookup(&self, name: &str) -> Option<&Type> {
@@ -84,12 +97,23 @@ impl TypeEnv {
         self.bindings.get(name)
     }
 
+    pub fn lookup_mut(&self, name: &str) -> Option<bool> {
+        for scope in self.mutability_scopes.iter().rev() {
+            if let Some(is_mut) = scope.get(name) {
+                return Some(*is_mut);
+            }
+        }
+        self.mutability.get(name).copied()
+    }
+
     fn push_scope(&mut self) {
         self.scopes.push(HashMap::new());
+        self.mutability_scopes.push(HashMap::new());
     }
 
     fn pop_scope(&mut self) {
         self.scopes.pop();
+        self.mutability_scopes.pop();
     }
 
     /// Register type constraints for Z3 based on the declared type
@@ -272,7 +296,7 @@ fn check_function(func: &FnDef, env: &mut TypeEnv) {
 
     // Bind params and register constraints
     for param in &func.params {
-        env.bind(param.name.clone(), param.ty.clone());
+        env.bind_mut(param.name.clone(), param.ty.clone(), param.is_mut);
         env.register_constraints(&param.name, &param.ty);
     }
 
@@ -303,7 +327,7 @@ fn check_contract(contract: &ContractDef, env: &mut TypeEnv) {
                 env,
             );
         }
-        env.bind(sv.name.clone(), sv.ty.clone());
+        env.bind_mut(sv.name.clone(), sv.ty.clone(), true);
         env.register_constraints(&sv.name, &sv.ty);
     }
 
@@ -326,7 +350,7 @@ fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str, expected_return:
     for stmt in &block.stmts {
         match stmt {
             Stmt::Let {
-                name, ty, value, ..
+                name, ty, is_mut, value, ..
             } => {
                 if let Some(undefined) = undefined_ident(value, env) {
                     env.errors.push(TypeError {
@@ -336,10 +360,10 @@ fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str, expected_return:
                 }
                 if let Some(declared) = ty {
                     check_declared_expr(name, declared, value, fn_name, "let", env);
-                    env.bind(name.clone(), declared.clone());
+                    env.bind_mut(name.clone(), declared.clone(), *is_mut);
                     env.register_constraints(name, declared);
                 } else if let Some(ref inferred) = infer_expr_type(value, env) {
-                    env.bind(name.clone(), inferred.clone());
+                    env.bind_mut(name.clone(), inferred.clone(), *is_mut);
                     env.register_constraints(name, inferred);
                 }
             }
@@ -350,19 +374,28 @@ fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str, expected_return:
                         location: fn_name.to_string(),
                     });
                 }
-                let target_name = match target {
-                    LValue::Ident(n) => Some(n.as_str()),
-                    _ => None,
+                let base_name = match target {
+                    LValue::Ident(n) => n.as_str(),
+                    LValue::FieldAccess { object, .. } => object.as_str(),
+                    LValue::Index { object, .. } => object.as_str(),
                 };
-                if let Some(name) = target_name {
-                    let target_ty = env.lookup(name).cloned();
-                    match &target_ty {
-                        None => env.errors.push(TypeError {
-                            message: format!("Assignment to undefined variable '{}'", name),
-                            location: fn_name.to_string(),
-                        }),
-                        Some(tt) => {
+                let target_ty = env.lookup(base_name).cloned();
+                match &target_ty {
+                    None => env.errors.push(TypeError {
+                        message: format!("Assignment to undefined variable '{}'", base_name),
+                        location: fn_name.to_string(),
+                    }),
+                    Some(tt) => {
+                        if let LValue::Ident(name) = target {
                             check_declared_expr(name, tt, value, fn_name, "Assignment", env);
+                        }
+                        if let Some(is_mut) = env.lookup_mut(base_name) {
+                            if !is_mut {
+                                env.errors.push(TypeError {
+                                    message: format!("Cannot assign to immutable variable '{}'", base_name),
+                                    location: fn_name.to_string(),
+                                });
+                            }
                         }
                     }
                 }
@@ -1038,6 +1071,19 @@ fn check_expr(expr: &Expr, env: &mut TypeEnv, location: &str) {
                             });
                         }
                     }
+                    if let Expr::Ident(arena_name) = &**arena {
+                        if let Some(is_mut) = env.lookup_mut(arena_name) {
+                            if !is_mut {
+                                env.errors.push(TypeError {
+                                    message: format!(
+                                        "Cannot allocate on immutable Arena '{}'",
+                                        arena_name
+                                    ),
+                                    location: location.to_string(),
+                                });
+                            }
+                        }
+                    }
                 }
                 Some(other) => {
                     env.errors.push(TypeError {
@@ -1185,7 +1231,7 @@ mod tests {
     #[test]
     fn test_type_check_transfer() {
         let src = r#"
-fn transfer(sender_balance: u64, receiver_balance: u64, amount: u64) -> u64
+fn transfer(mut sender_balance: u64, mut receiver_balance: u64, amount: u64) -> u64
     where {
         amount > 0,
         sender_balance >= amount,

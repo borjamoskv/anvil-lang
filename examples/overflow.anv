@@ -9,7 +9,7 @@
 // The postcondition demands total' == a + b, but with
 // no upper bound on a + b, Z3 can find values where
 // the result exceeds u64 range.
-fn add_unsafe(a: u64, b: u64) -> u64
+fn add_unsafe(mut a: u64, b: u64) -> u64
     where {
         a > 0,
         b > 0,
@@ -23,7 +23,7 @@ fn add_unsafe(a: u64, b: u64) -> u64
 // SAFE: Addition with explicit overflow guard.
 // The precondition `a + b <= max_supply` ensures
 // the result stays within bounds.
-fn add_safe(a: u64, b: u64, max_supply: u64) -> u64
+fn add_safe(mut a: u64, b: u64, max_supply: u64) -> u64
     where {
         a > 0,
         b > 0,

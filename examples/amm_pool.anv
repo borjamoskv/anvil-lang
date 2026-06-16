@@ -11,7 +11,7 @@ struct AMMPool {
 }
 
 // Función de swap vulnerable a Integer Overflow (u64 wrap-around)
-fn swap_with_fee(reserve_x: u64, reserve_y: u64, amount_in_x: u64) -> u64
+fn swap_with_fee(mut reserve_x: u64, mut reserve_y: u64, amount_in_x: u64) -> u64
     where {
         reserve_x > 0,
         reserve_y > 0,
