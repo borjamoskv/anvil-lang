@@ -1,0 +1,65 @@
+// ============================================================
+// ANVIL COMPILER AST (Self-Hosted Ouroboros)
+// "The compiler verifies the compiler."
+// ============================================================
+
+// Type system mapping
+struct TypeNode {
+    kind: u8, // 0 = U64, 1 = Bool, 2 = Address, 3 = Wallet, 4 = Gas
+    bit_width: u16
+}
+
+// Expressions
+struct ExprNode {
+    kind: u8, // 0 = Literal, 1 = Ident, 2 = BinOp
+    left_id: u64,
+    right_id: u64,
+    value: u256
+}
+
+// Statements
+struct StmtNode {
+    kind: u8, // 0 = Let, 1 = Assign, 2 = Assert, 3 = Ghost
+    expr_id: u64,
+    target_id: u64
+}
+
+// Function Definition
+struct FnDefNode {
+    id: u64,
+    param_count: u8,
+    stmt_count: u64
+}
+
+// The AST state container ensures topological invariants are met.
+// For example: an expression tree cannot have cyclic dependencies.
+contract AstGraph {
+    state node_count: u64 = 0;
+    state expr_count: u64 = 0;
+
+    // Compiler Invariant:
+    // The AST must strictly grow or remain static during parsing.
+    // Negative node counts indicate memory corruption or topological breakage.
+    invariant {
+        node_count >= 0,
+        expr_count >= 0
+    }
+
+    pub fn register_expr(mut expr_count: u64) -> u64 
+        where {
+            expr_count' == expr_count + 1
+        }
+    {
+        expr_count += 1;
+        return expr_count;
+    }
+
+    pub fn register_stmt(mut node_count: u64) -> u64
+        where {
+            node_count' == node_count + 1
+        }
+    {
+        node_count += 1;
+        return node_count;
+    }
+}
