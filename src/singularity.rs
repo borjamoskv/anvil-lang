@@ -214,7 +214,7 @@ pub fn synthesize_ast_to_verilog(program: &crate::core::ast::Program) -> String 
                             verilog.push_str(&gen_verilog_memory_writes(&arena_name, &val_str, current_offset, size));
                             verilog.push_str(&format!("            reg_{} <= {};\n", name, current_offset));
 
-                            arena_offsets.insert(arena_name, current_offset + size);
+                            arena_offsets.insert(arena_name, current_offset + ((size + 7) & !7));
                         } else {
                             let val_str = verilog_expr(value, &mut arena_offsets, &var_types, &struct_sizes);
                             verilog.push_str(&format!("            reg_{} <= {};\n", name, val_str));
@@ -238,7 +238,7 @@ pub fn synthesize_ast_to_verilog(program: &crate::core::ast::Program) -> String 
                             verilog.push_str(&gen_verilog_memory_writes(&arena_name, &val_str, current_offset, size));
                             verilog.push_str(&format!("            {} <= {};\n", target_name, current_offset));
 
-                            arena_offsets.insert(arena_name, current_offset + size);
+                            arena_offsets.insert(arena_name, current_offset + ((size + 7) & !7));
                         } else {
                             let val_str = verilog_expr(value, &mut arena_offsets, &var_types, &struct_sizes);
                             let op_symbol = match op {
@@ -280,7 +280,7 @@ pub fn synthesize_ast_to_verilog(program: &crate::core::ast::Program) -> String 
                                 verilog.push_str(&gen_verilog_memory_writes(&arena_name, &val_str, current_offset, size));
                                 verilog.push_str(&format!("            out_val <= {};\n", current_offset));
 
-                                arena_offsets.insert(arena_name, current_offset + size);
+                                arena_offsets.insert(arena_name, current_offset + ((size + 7) & !7));
                             } else {
                                 let val_str = verilog_expr(expr, &mut arena_offsets, &var_types, &struct_sizes);
                                 verilog.push_str(&format!("            out_val <= {};\n", val_str));

@@ -36,13 +36,15 @@ pub fn generate_rust(program: &Program) -> String {
         out.push_str("    #[allow(dead_code)]\n");
         out.push_str("    fn alloc<T>(&self, value: T) -> *mut T {\n");
         out.push_str("        let size = std::mem::size_of::<T>();\n");
+        out.push_str("        let aligned_size = (size + 7) & !7;\n");
         out.push_str("        let current = self.offset.get();\n");
-        out.push_str("        if current + size > N {\n");
+        out.push_str("        let aligned = (current + 7) & !7;\n");
+        out.push_str("        if aligned + aligned_size > N {\n");
         out.push_str("            panic!(\"Out of memory in Arena\");\n");
         out.push_str("        }\n");
-        out.push_str("        self.offset.set(current + size);\n");
+        out.push_str("        self.offset.set(aligned + aligned_size);\n");
         out.push_str("        unsafe {\n");
-        out.push_str("            let ptr = self.buffer.as_ptr().cast::<u8>().add(current).cast::<T>();\n");
+        out.push_str("            let ptr = self.buffer.as_ptr().cast::<u8>().add(aligned).cast::<T>();\n");
         out.push_str("            ptr.write(value);\n");
         out.push_str("            ptr\n");
         out.push_str("        }\n");

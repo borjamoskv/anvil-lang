@@ -3073,6 +3073,7 @@ fn process_alloc_side_effects<'ctx>(
                 Some(ty) => verifier_type_size(&ty) as i64,
                 None => return,
             };
+            let aligned_size = (size + 7) & !7;
 
             let offset_var_name = format!("{}_offset", arena_name);
             let current_offset = match encoding.current_vars.get(&offset_var_name).cloned() {
@@ -3080,7 +3081,7 @@ fn process_alloc_side_effects<'ctx>(
                 None => return,
             };
 
-            let size_bv = BV::from_i64(ctx, size, SOLVER_BV_WIDTH);
+            let size_bv = BV::from_i64(ctx, aligned_size, SOLVER_BV_WIDTH);
             let cap_bv = BV::from_i64(ctx, capacity, SOLVER_BV_WIDTH);
             let new_offset = current_offset.bvadd(&size_bv);
             solver.push();

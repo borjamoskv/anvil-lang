@@ -562,7 +562,8 @@ fn gen_llvm_expr(
 
             let value_ty = infer_expr_type_llvm(value, var_types).unwrap_or(Type::U64);
             let size = llvm_type_size(&value_ty, struct_sizes);
-            arena_offsets.insert(arena_name.clone(), current_offset + size);
+            let aligned_size = (size + 7) & !7;
+            arena_offsets.insert(arena_name.clone(), current_offset + aligned_size);
 
             let (val_str, next_vreg) = gen_llvm_expr(value, vreg, out, var_types, arena_offsets, struct_sizes);
             let gep_reg = next_vreg;
