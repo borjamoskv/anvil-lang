@@ -2,6 +2,43 @@ import os
 import sys
 import time
 import subprocess
+import Quartz
+
+def set_clipboard(text):
+    # Usar pbcopy para guardar texto en el portapapeles de macOS
+    p = subprocess.Popen(['pbcopy'], stdin=subprocess.PIPE)
+    p.communicate(input=text.encode('utf-8'))
+
+def press_key(key_code, flags=0):
+    down = Quartz.CGEventCreateKeyboardEvent(None, key_code, True)
+    up = Quartz.CGEventCreateKeyboardEvent(None, key_code, False)
+    if flags:
+        Quartz.CGEventSetFlags(down, flags)
+        Quartz.CGEventSetFlags(up, flags)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)
+    time.sleep(0.05)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
+    time.sleep(0.05)
+
+def press_cmd_v():
+    # 9 es el key code de 'v'
+    # kCGEventFlagMaskCommand es 0x00100000 (o 1048576)
+    cmd_flag = 0x00100000
+    press_key(9, cmd_flag)
+
+def press_tab():
+    # 48 es el key code de Tab
+    press_key(48)
+
+def type_unicode(text):
+    down = Quartz.CGEventCreateKeyboardEvent(None, 0, True)
+    up = Quartz.CGEventCreateKeyboardEvent(None, 0, False)
+    Quartz.CGEventKeyboardSetUnicodeString(down, len(text), text)
+    Quartz.CGEventKeyboardSetUnicodeString(up, len(text), text)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, down)
+    time.sleep(0.05)
+    Quartz.CGEventPost(Quartz.kCGHIDEventTap, up)
+    time.sleep(0.05)
 
 def publish():
     draft_path = "/Users/borjafernandezangulo/10_PROJECTS/anvil-lang/reports/substack_draft_david_dominguez.md"
@@ -15,7 +52,7 @@ def publish():
     title = ""
     body_lines = []
     
-    # Extraer el título (primera línea con #) y el cuerpo
+    # Extraer el título y el cuerpo
     for line in lines:
         if line.startswith("# ") and not title:
             title = line.replace("# ", "").strip()
@@ -23,72 +60,49 @@ def publish():
             body_lines.append(line)
             
     body = "".join(body_lines).strip()
-    
-    # Crear script AppleScript temporal para automatizar Chrome
-    # Copiamos primero el título al portapapeles, abrimos Chrome, pegamos, copiamos el cuerpo, pegamos.
-    # Usamos osascript para interactuar.
-    
-    # Escribimos los archivos temporales para el portapapeles
-    title_tmp = "/tmp/substack_title.txt"
-    body_tmp = "/tmp/substack_body.txt"
-    
-    with open(title_tmp, "w", encoding="utf-8") as f:
-        f.write(title)
-        
-    with open(body_tmp, "w", encoding="utf-8") as f:
-        f.write(body)
-        
-    applescript_content = f"""
-    -- Copiar título al portapapeles de macOS
-    set theTitle to read "/tmp/substack_title.txt" as «class utf8»
-    set theBody to read "/tmp/substack_body.txt" as «class utf8»
-    
-    set the clipboard to theTitle
-    
+    subtitle = "Cómo los modelos de simulación entran en cortocircuito cognitivo ante el mínimo input de la realidad fiscal y técnica."
+
+    print("Abriendo Google Chrome en la URL de nuevo post de Substack...")
+    # Usar AppleScript para activar Chrome y abrir la URL (no requiere permisos de keystroke)
+    applescript_open = f"""
     tell application "Google Chrome"
         activate
-        -- Abrir nueva pestaña con el editor de Substack
         open location "https://borjamoskv.substack.com/dashboard/post/new?type=post"
-        delay 8 -- Esperar a que cargue la página del editor
-    end tell
-    
-    tell application "System Events"
-        tell process "Google Chrome"
-            set frontmost to true
-            -- El cursor debería estar automáticamente en el campo del título
-            -- Pegar el título
-            keystroke "v" using command down
-            delay 1
-            
-            -- Copiar el cuerpo al portapapeles
-            set the clipboard to theBody
-            delay 0.5
-            
-            -- Presionar Tab para pasar al subtítulo / cuerpo
-            keystroke tab
-            delay 0.5
-            -- Presionar Tab otra vez por si acaso entra en subtítulo antes del cuerpo
-            keystroke tab
-            delay 0.5
-            
-            -- Pegar el cuerpo del artículo
-            keystroke "v" using command down
-            delay 1
-        end tell
     end tell
     """
+    subprocess.run(["osascript", "-e", applescript_open])
     
-    scpt_path = "/tmp/publish_substack.scpt"
-    with open(scpt_path, "w", encoding="utf-8") as f:
-        f.write(applescript_content)
-        
-    print("Iniciando automatización de Substack vía Google Chrome y AppleScript...")
-    result = subprocess.run(["osascript", scpt_path], capture_output=True, text=True)
+    print("Esperando 10 segundos para la carga del editor de Substack...")
+    time.sleep(10)
     
-    if result.returncode == 0:
-        print("[SUCCESS] Automatización completada. Revisa Google Chrome en tu escritorio.")
-    else:
-        print(f"[FAIL] Error en AppleScript: {result.stderr.strip()}")
+    print("Inyectando título...")
+    set_clipboard(title)
+    press_cmd_v()
+    time.sleep(1)
+    
+    print("Pasando al campo de subtítulo (Tab)...")
+    press_tab()
+    time.sleep(0.5)
+    
+    print("Inyectando subtítulo...")
+    set_clipboard(subtitle)
+    press_cmd_v()
+    time.sleep(1)
+    
+    print("Pasando al campo de cuerpo (Tab)...")
+    press_tab()
+    time.sleep(0.5)
+    
+    print("Copiando cuerpo del artículo al portapapeles...")
+    set_clipboard(body)
+    time.sleep(0.5)
+    
+    print("Pegando cuerpo del artículo (Cmd+V)...")
+    press_cmd_v()
+    time.sleep(1)
+    
+    print("[SUCCESS] Automatización de bajo nivel completada con éxito.")
+    print("Revisa tu navegador. El borrador de Substack debe estar listo para publicar en tu pantalla.")
 
 if __name__ == "__main__":
     publish()
