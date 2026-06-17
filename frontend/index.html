@@ -651,7 +651,10 @@
                         <div style="padding: 1rem; display: flex; flex-direction: column; background: #050505;">
                             <div style="font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); margin-bottom: 0.5rem; text-transform: uppercase; display: flex; justify-content: space-between; align-items: center;">
                                 <span>SMT Verification Trace</span>
-                                <span id="mev-solve-status" style="color: var(--red); font-weight: bold;">UNVERIFIED</span>
+                            </div>
+                            <div id="mev-solve-status-bar" style="display: flex; align-items: center; justify-content: space-between; padding: 0.5rem 0.75rem; border: 1px solid var(--border); background: var(--bg-3); margin-bottom: 0.5rem; font-family: var(--mono); font-size: 0.72rem; font-weight: bold; transition: all 0.2s;">
+                                <span style="color: var(--text-muted); font-weight: normal; text-transform: uppercase; font-size: 0.65rem;">Z3 Validator Status:</span>
+                                <span id="mev-solve-status" style="color: var(--text-muted); text-transform: uppercase;">[UNVERIFIED]</span>
                             </div>
                             <div id="mev-console" style="flex: 1; border: 1px solid rgba(255,255,255,0.03); font-family: var(--mono); font-size: 0.7rem; color: var(--green); padding: 0.75rem; overflow-y: auto; text-align: left; line-height: 1.5; max-height: 180px; display: flex; flex-direction: column; gap: 0.25rem;">
                                 <div>Ready to initiate SMT validation.</div>
@@ -1137,6 +1140,17 @@ The invariants hold universally over the state space.</span>`;
         simBlock: 18429402
     };
 
+    function setSolveStatus(text, bg, border, color) {
+        const statusEl = document.getElementById('mev-solve-status');
+        const statusBar = document.getElementById('mev-solve-status-bar');
+        if (statusEl && statusBar) {
+            statusEl.textContent = text;
+            statusEl.style.color = color;
+            statusBar.style.background = bg;
+            statusBar.style.borderColor = border;
+        }
+    }
+
     function onMevParamChange() {
         mevState.uniX = parseInt(document.getElementById('slide-uni-x').value);
         mevState.uniY = parseInt(document.getElementById('slide-uni-y').value);
@@ -1202,19 +1216,16 @@ fn check_profit(
 
         // Terminal status update
         const consoleEl = document.getElementById('mev-console');
-        const statusEl = document.getElementById('mev-solve-status');
 
         if (isProfitable) {
-            statusEl.textContent = "PROFIT DETECTED (UNVERIFIED)";
-            statusEl.style.color = "var(--accent-light)";
+            setSolveStatus('[PROFIT DETECTED (UNVERIFIED)]', 'rgba(43, 59, 229, 0.08)', 'var(--accent-dim)', 'var(--accent-light)');
             consoleEl.innerHTML = `<div>[PROPOSAL] Arbitrage is profitable in math domain.</div>
                 <div style="color: var(--accent-light)">Uniswap Swap: ${mevState.amountIn} X -> +${amountY} Y</div>
                 <div style="color: var(--accent-light)">Sushiswap Swap: ${amountY} Y -> +${amountXOut} X</div>
                 <div style="color: var(--green); font-weight: bold;">Expected Net Profit: +${netProfit} X (Min Profit Target: ${mevState.minProfit})</div>
                 <div style="color: var(--text-muted)">Click "Verify Risk-Free" to prove via Z3 SMT Solver.</div>`;
         } else {
-            statusEl.textContent = "VULNERABLE TO LOSS";
-            statusEl.style.color = "var(--red)";
+            setSolveStatus('[✗ VULNERABLE TO LOSS]', 'rgba(255, 51, 85, 0.08)', 'rgba(255, 51, 85, 0.2)', 'var(--red)');
             consoleEl.innerHTML = `<div>[WARNING] Invariant check would fail!</div>
                 <div>Uniswap Swap: ${mevState.amountIn} X -> +${amountY} Y</div>
                 <div>Sushiswap Swap: ${amountY} Y -> +${amountXOut} X</div>
@@ -1267,8 +1278,7 @@ fn check_profit(
             const data = await response.json();
 
             if (data.status === 'VERIFIED') {
-                statusEl.textContent = "✓ MATHEMATICALLY PROVEN SAFE";
-                statusEl.style.color = "var(--green)";
+                setSolveStatus('[✓ PROVEN SAFE]', 'rgba(0, 255, 136, 0.08)', 'rgba(0, 255, 136, 0.2)', 'var(--green)');
                 mevState.verifiedProofs++;
                 document.getElementById('mev-proof-count').textContent = mevState.verifiedProofs;
 
@@ -1278,8 +1288,7 @@ fn check_profit(
                 // Animate path
                 animateSuccessFlow();
             } else {
-                statusEl.textContent = "✗ REJECTED BY Z3";
-                statusEl.style.color = "var(--red)";
+                setSolveStatus('[✗ REJECTED BY Z3]', 'rgba(255, 51, 85, 0.08)', 'rgba(255, 51, 85, 0.2)', 'var(--red)');
                 consoleEl.innerHTML += `<div style="color: var(--red); font-weight: bold;">[Z3] SAT (Counterexample found: transaction could result in loss).</div>`;
                 consoleEl.innerHTML += `<div style="color: var(--red);">${escapeHtml(data.message)}</div>`;
             }
@@ -1374,7 +1383,7 @@ fn check_profit(
                 }
             }, 300);
         } else {
-            consoleEl.innerHTML = `<div style="color: var(--text-muted);">[BLOCK ${mevState.simBlock}] Scanning mempool... no risk-free arbitrage. (Z3 safety check rejected transaction)</div>` + consoleEl.innerHTML;
+            consoleEl.innerHTML = `<div style="color: var(--red); font-weight: bold;">[BLOCKED] Block ${mevState.simBlock}: Z3 verification failed: [✗ VULNERABLE TO LOSS]. Transaction blocked.</div>` + consoleEl.innerHTML;
         }
 
         // Keep console log clean
