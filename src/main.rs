@@ -14,7 +14,6 @@ use cli::KeyAction;
 use clap::{Parser, Subcommand};
 use colored::Colorize;
 use std::path::PathBuf;
-use tracing::info;
 
 #[derive(Parser)]
 #[command(
@@ -67,11 +66,6 @@ enum Commands {
         )]
         timeout: u64,
     },
-    /// Compile an Anvil file to Rust
-    Compile {
-        /// Path to the .anv file
-        file: PathBuf,
-    },
     /// Initiate the Singularity Engine (UltraThink Mode)
     Singularity,
     /// Diagnose local Anvil toolchain and runtime configuration
@@ -100,8 +94,7 @@ enum Commands {
     },
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let cli_args = Cli::parse();
     let machine_readable = cli_args.command.machine_readable();
 
@@ -111,28 +104,41 @@ async fn main() {
         print_banner();
     }
 
-    match cli_args.command {
-        Commands::Check {
-            file,
-            json,
-            timeout,
-        } => cli::cmd_check(&file, json, timeout),
-        Commands::Build {
-            file,
-            output,
-            target,
-            timeout,
-        } => cli::cmd_build(&file, &output, &target, timeout),
-        Commands::Compile { file } => {
-            info!("Iniciando pase de compilación a Rust para: {:?}", file)
+    let is_server = matches!(cli_args.command, Commands::Lsp | Commands::Saas { .. });
+
+    let rt = if is_server {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    } else {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+    };
+
+    rt.block_on(async {
+        match cli_args.command {
+            Commands::Check {
+                file,
+                json,
+                timeout,
+            } => cli::cmd_check(&file, json, timeout),
+            Commands::Build {
+                file,
+                output,
+                target,
+                timeout,
+            } => cli::cmd_build(&file, &output, &target, timeout),
+            Commands::Singularity => singularity::initiate_engine(),
+            Commands::Doctor { json } => cli::cmd_doctor(json),
+            Commands::Ast { file } => cli::cmd_ast(&file),
+            Commands::Lsp => lsp::run_server().await,
+            Commands::Saas { port } => engine::saas::start_server(port).await,
+            Commands::Keys { action } => cli::cmd_keys(action).await,
         }
-        Commands::Singularity => singularity::initiate_engine(),
-        Commands::Doctor { json } => cli::cmd_doctor(json),
-        Commands::Ast { file } => cli::cmd_ast(&file),
-        Commands::Lsp => lsp::run_server().await,
-        Commands::Saas { port } => engine::saas::start_server(port).await,
-        Commands::Keys { action } => cli::cmd_keys(action).await,
-    }
+    });
 }
 
 fn init_tracing(machine_readable: bool) {
