@@ -1,1 +1,0 @@
-/Users/borjafernandezangulo/10_PROJECTS/cortex-persist/.snapshots/readme.md
