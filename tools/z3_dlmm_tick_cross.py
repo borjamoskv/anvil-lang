@@ -1,3 +1,4 @@
+import ast
 """z3_dlmm_tick_cross.py — Z3 DLMM Tick Crossing Formal Prover (C5-REAL)"""
 
 import time
@@ -90,7 +91,7 @@ def main() -> None:
             f"| Bin2 Y: {m[v['bin2_y_scaled']].as_long()}"
         )
         print("\n--- Resultado del Arbitraje ---")
-        print(f"Total Y obtenido:   {m.eval(v['total_y_out']).as_long()}")
+        print(f"Total Y obtenido:   {m.ast.literal_eval(v['total_y_out']).as_long()}")
         print(f"Total X recuperado: {m.eval(v['total_x_out']).as_long()}")
     else:
         print(
