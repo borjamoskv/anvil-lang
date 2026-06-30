@@ -3016,13 +3016,7 @@ fn verifier_type_size(ty: &Type) -> usize {
         Type::U256 | Type::Wallet | Type::TxHash => 32,
         Type::Address => 20,
         Type::Signature => 65,
-        Type::Named(name) => {
-            if name.starts_with('*') {
-                8
-            } else {
-                8
-            }
-        }
+        Type::Named(_) => 8,
         _ => 8,
     }
 }

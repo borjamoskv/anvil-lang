@@ -575,8 +575,8 @@ fn parse_let_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
     let mut ty = None;
     let is_mut = {
         let trimmed = pair.as_str().trim_start();
-        if trimmed.starts_with("let") {
-            trimmed[3..].trim_start().starts_with("mut")
+        if let Some(stripped) = trimmed.strip_prefix("let") {
+            stripped.trim_start().starts_with("mut")
         } else {
             false
         }

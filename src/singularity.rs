@@ -299,6 +299,7 @@ pub fn synthesize_ast_to_verilog(program: &crate::core::ast::Program) -> String 
     verilog
 }
 
+#[allow(clippy::only_used_in_recursion)]
 fn verilog_expr(
     expr: &crate::core::ast::Expr,
     arena_offsets: &mut std::collections::HashMap<String, usize>,

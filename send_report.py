@@ -127,7 +127,9 @@ def main():
         sys.exit(1)
         
     try:
-        conn = sqlite3.connect(DB_PATH)
+        conn = sqlite3.connect(DB_PATH, timeout=5.0)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
         total_records, metrics, recent_entries = get_ledger_summary(conn)
         total_keys, key_tiers = get_keys_summary(conn)
         conn.close()

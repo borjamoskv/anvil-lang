@@ -1,0 +1,19 @@
+;; --- Contract: SafeBank ---
+;; Function: transfer
+PUSH 1  ; Address for amount
+STR     ; Pop param and store
+PUSH 2  ; Address for sender_balance
+STR     ; Pop param and store
+PUSH 2 ; Load sender_balance for compound assignment
+LDR
+PUSH 1 ; Load amount
+LDR
+SUB
+PUSH 2 ; Store back to sender_balance
+STR
+PUSH 2 ; Load return value sender_balance
+LDR
+OUTN    ; Print return value
+PUSH 10 ; Print newline
+OUTA
+;; --- End Function ---

@@ -30,6 +30,9 @@ pub async fn cmd_keys(action: KeyAction) {
     let pool = SqlitePool::connect(&db_url)
         .await
         .expect("Failed to connect to database");
+    let _ = sqlx::query("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;")
+        .execute(&pool)
+        .await;
 
     match action {
         KeyAction::Add { key, owner, tier } => {

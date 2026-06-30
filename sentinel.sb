@@ -1,0 +1,24 @@
+(version 1)
+(deny default)
+
+; Permitir ejecución del intérprete y osascript
+(allow process-exec
+    (literal "/usr/bin/python3")
+    (literal "/usr/bin/osascript")
+    (literal "/bin/sh"))
+(allow process-fork)
+
+; Sistema de archivos: solo lectura general, escritura solo a stdout/stderr
+(allow file-read*)
+(allow file-write* 
+    (literal "/dev/stdout") 
+    (literal "/dev/stderr"))
+
+; IPC y Apple Events (Estricto para Mail.app)
+(allow mach-lookup)
+(allow appleevent-send (appleevent-destination "com.apple.mail"))
+(allow ipc-posix-shm)
+(allow sysctl-read)
+
+; Cortafuegos absoluto C5-REAL
+(deny network*)

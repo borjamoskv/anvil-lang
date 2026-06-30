@@ -241,11 +241,29 @@
             letter-spacing: 1px;
             text-transform: uppercase;
             cursor: pointer;
-            transition: background 0.15s, transform 0.1s;
+            transition: all 0.3s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            border: 1px solid rgba(43,59,229,0.4);
+            box-shadow: 0 0 15px rgba(43,59,229,0.2);
+            backdrop-filter: blur(8px);
         }
 
-        #verify-btn:hover { background: #3d50f5; }
+        #verify-btn:hover { 
+            background: #3d50f5; 
+            box-shadow: 0 0 25px rgba(43,59,229,0.6);
+            transform: translateY(-2px);
+        }
         #verify-btn:active { transform: scale(0.98); }
+
+        @keyframes z3Pulse {
+            0% { box-shadow: 0 0 10px rgba(0, 255, 136, 0.2); border-color: rgba(0,255,136,0.5); }
+            50% { box-shadow: 0 0 30px rgba(0, 255, 136, 0.8); border-color: rgba(0,255,136,1); }
+            100% { box-shadow: 0 0 10px rgba(0, 255, 136, 0.2); border-color: rgba(0,255,136,0.5); }
+        }
+        .z3-verifying {
+            animation: z3Pulse 1.2s infinite alternate !important;
+            background: rgba(0, 255, 136, 0.1) !important;
+            color: #00FF88 !important;
+        }
         #verify-btn:disabled { background: #1f1f1f; color: #444; cursor: not-allowed; }
 
         /* ── RESULT PANEL ── */
@@ -751,6 +769,17 @@
 
 <script>
     const EXAMPLES = {
+        test_vault: `contract SafeVault { 
+    fn deposit(bal: u64, amt: u64) -> u64 
+        where { 
+            amt > 0, 
+            bal + amt >= bal, 
+            bal' == bal + amt 
+        } 
+    { 
+        return bal + amt; 
+    } 
+}`,
         mev_arbitrage: `// ANVIL APEX-MEV: Sovereign Risk-Free Arbitrage Safety Wrapper
 // "Where trust doesn't compile."
 
@@ -962,6 +991,7 @@ fn withdraw(balance: u64, amount: u64) -> u64
 
         btn.disabled = true;
         btn.innerHTML = '<span class="spinner"></span>PROVING...';
+        btn.classList.add('z3-verifying');
         resultPanel.style.display = 'none';
 
         try {
@@ -989,6 +1019,8 @@ fn withdraw(balance: u64, amount: u64) -> u64
                     certificate_hash: null
                 };
             }
+            
+            btn.classList.remove('z3-verifying');
             resultPanel.style.display = 'block';
 
             if (data.status === 'VERIFIED') {
@@ -1015,6 +1047,7 @@ The invariants hold universally over the state space.</span>`;
             }
 
         } catch (e) {
+            btn.classList.remove('z3-verifying');
             resultPanel.style.display = 'block';
             resultTitle.textContent = '✗ CONNECTION ERROR';
             resultContent.innerHTML =

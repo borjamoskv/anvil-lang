@@ -851,11 +851,7 @@ fn infer_expr_type(expr: &Expr, env: &TypeEnv) -> Option<Type> {
             let arena_ty = infer_expr_type(arena, env);
             match arena_ty {
                 Some(Type::Arena(_)) => {
-                    if let Some(value_ty) = infer_expr_type(value, env) {
-                        Some(Type::Named(format!("*{}", format_type(&value_ty))))
-                    } else {
-                        None
-                    }
+                    infer_expr_type(value, env).map(|value_ty| Type::Named(format!("*{}", format_type(&value_ty))))
                 }
                 _ => None,
             }

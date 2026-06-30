@@ -36,6 +36,12 @@ pub struct InfinityGroupoid<T> {
     // Higher order paths (homotopies) are deferred to lazy evaluation (JIT compilation).
 }
 
+impl<T: PartialEq + Clone> Default for InfinityGroupoid<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: PartialEq + Clone> InfinityGroupoid<T> {
     pub fn new() -> Self {
         Self {
