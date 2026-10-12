@@ -153,7 +153,9 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type, String> {
         Rule::arena_type => {
             let mut inners = inner.into_inner();
             let size_str = inners.next().unwrap().as_str();
-            let size = size_str.parse::<usize>().map_err(|e| format!("Invalid arena size: {}", e))?;
+            let size = size_str
+                .parse::<usize>()
+                .map_err(|e| format!("Invalid arena size: {}", e))?;
             Ok(Type::Arena(size))
         }
         _ => Ok(Type::Unit),

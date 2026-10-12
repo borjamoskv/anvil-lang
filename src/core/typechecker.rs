@@ -316,7 +316,8 @@ fn check_function(func: &FnDef, env: &mut TypeEnv) {
     // C5-REAL Univalence Hook: Map function invariants to topological paths
     for _inv in &func.invariants {
         env.groupoid.inject_0_cell(format!("inv_{}", func.name));
-        env.groupoid.establish_1_cell_equivalence(format!("inv_{}", func.name), "True".to_string());
+        env.groupoid
+            .establish_1_cell_equivalence(format!("inv_{}", func.name), "True".to_string());
     }
 
     env.pop_scope();
@@ -348,8 +349,12 @@ fn check_contract(contract: &ContractDef, env: &mut TypeEnv) {
 
     // C5-REAL Univalence Hook: Map contract invariants
     for _inv in &contract.invariants {
-        env.groupoid.inject_0_cell(format!("contract_inv_{}", contract.name));
-        env.groupoid.establish_1_cell_equivalence(format!("contract_inv_{}", contract.name), "True".to_string());
+        env.groupoid
+            .inject_0_cell(format!("contract_inv_{}", contract.name));
+        env.groupoid.establish_1_cell_equivalence(
+            format!("contract_inv_{}", contract.name),
+            "True".to_string(),
+        );
     }
 
     env.pop_scope();
@@ -366,7 +371,11 @@ fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str, expected_return:
     for stmt in &block.stmts {
         match stmt {
             Stmt::Let {
-                name, ty, is_mut, value, ..
+                name,
+                ty,
+                is_mut,
+                value,
+                ..
             } => {
                 if let Some(undefined) = undefined_ident(value, env) {
                     env.errors.push(TypeError {
@@ -408,7 +417,10 @@ fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str, expected_return:
                         if let Some(is_mut) = env.lookup_mut(base_name) {
                             if !is_mut {
                                 env.errors.push(TypeError {
-                                    message: format!("Cannot assign to immutable variable '{}'", base_name),
+                                    message: format!(
+                                        "Cannot assign to immutable variable '{}'",
+                                        base_name
+                                    ),
                                     location: fn_name.to_string(),
                                 });
                             }
@@ -446,12 +458,15 @@ fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str, expected_return:
             }
             Stmt::Assert { condition, .. } => {
                 check_bool_expr(condition, env, fn_name, "assert condition");
-                
-                // C5-REAL Univalence Hook: 
-                // In an advanced HoTT configuration, this asserts that 
+
+                // C5-REAL Univalence Hook:
+                // In an advanced HoTT configuration, this asserts that
                 // condition is topologically equivalent to true.
                 env.groupoid.inject_0_cell(format!("assert_{}", fn_name));
-                env.groupoid.establish_1_cell_equivalence(format!("assert_{}", fn_name), "True".to_string());
+                env.groupoid.establish_1_cell_equivalence(
+                    format!("assert_{}", fn_name),
+                    "True".to_string(),
+                );
             }
             Stmt::If {
                 condition,
@@ -561,9 +576,7 @@ fn expr_contains_fncall(expr: &Expr) -> bool {
                 || else_block.as_ref().is_some_and(block_contains_fncall)
         }
         Expr::Block(block) => block_contains_fncall(block),
-        Expr::Alloc { arena, value } => {
-            expr_contains_fncall(arena) || expr_contains_fncall(value)
-        }
+        Expr::Alloc { arena, value } => expr_contains_fncall(arena) || expr_contains_fncall(value),
         _ => false,
     }
 }
@@ -850,9 +863,8 @@ fn infer_expr_type(expr: &Expr, env: &TypeEnv) -> Option<Type> {
         Expr::Alloc { arena, value } => {
             let arena_ty = infer_expr_type(arena, env);
             match arena_ty {
-                Some(Type::Arena(_)) => {
-                    infer_expr_type(value, env).map(|value_ty| Type::Named(format!("*{}", format_type(&value_ty))))
-                }
+                Some(Type::Arena(_)) => infer_expr_type(value, env)
+                    .map(|value_ty| Type::Named(format!("*{}", format_type(&value_ty)))),
                 _ => None,
             }
         }
@@ -1044,9 +1056,17 @@ pub fn format_type(ty: &Type) -> String {
 }
 
 fn type_is_fixed_size(ty: &Type, env: &TypeEnv) -> bool {
-    fn check_recursive(ty: &Type, env: &TypeEnv, visited: &mut std::collections::HashSet<String>) -> bool {
+    fn check_recursive(
+        ty: &Type,
+        env: &TypeEnv,
+        visited: &mut std::collections::HashSet<String>,
+    ) -> bool {
         match ty {
-            Type::Array(_) | Type::Map(_, _) | Type::Option(_) | Type::Result(_, _) | Type::Arena(_) => false,
+            Type::Array(_)
+            | Type::Map(_, _)
+            | Type::Option(_)
+            | Type::Result(_, _)
+            | Type::Arena(_) => false,
             Type::Named(name) => {
                 if name.starts_with('*') {
                     return true; // Pointer is always fixed size
@@ -1055,7 +1075,10 @@ fn type_is_fixed_size(ty: &Type, env: &TypeEnv) -> bool {
                     return false; // Loop/Self-referential struct not behind pointer is not fixed-size/invalid
                 }
                 let is_fixed = if let Some(struct_def) = env.structs.get(name) {
-                    struct_def.fields.iter().all(|field| check_recursive(&field.ty, env, visited))
+                    struct_def
+                        .fields
+                        .iter()
+                        .all(|field| check_recursive(&field.ty, env, visited))
                 } else {
                     true
                 };
@@ -1145,7 +1168,11 @@ fn check_expr(expr: &Expr, env: &mut TypeEnv, location: &str) {
             check_expr(object, env, location);
             check_expr(index, env, location);
         }
-        Expr::If { condition, then_block, else_block } => {
+        Expr::If {
+            condition,
+            then_block,
+            else_block,
+        } => {
             check_expr(condition, env, location);
             check_block_exprs(then_block, env, location);
             if let Some(eb) = else_block {
@@ -1165,17 +1192,26 @@ fn check_block_exprs(block: &Block, env: &mut TypeEnv, location: &str) {
             Stmt::Let { value, .. } | Stmt::Assign { value, .. } | Stmt::Ghost { value, .. } => {
                 check_expr(value, env, location);
             }
-            Stmt::Return(Some(expr)) | Stmt::Assert { condition: expr, .. } => {
+            Stmt::Return(Some(expr))
+            | Stmt::Assert {
+                condition: expr, ..
+            } => {
                 check_expr(expr, env, location);
             }
-            Stmt::If { condition, then_block, else_block } => {
+            Stmt::If {
+                condition,
+                then_block,
+                else_block,
+            } => {
                 check_expr(condition, env, location);
                 check_block_exprs(then_block, env, location);
                 if let Some(eb) = else_block {
                     check_block_exprs(eb, env, location);
                 }
             }
-            Stmt::While { condition, body, .. } => {
+            Stmt::While {
+                condition, body, ..
+            } => {
                 check_expr(condition, env, location);
                 check_block_exprs(body, env, location);
             }

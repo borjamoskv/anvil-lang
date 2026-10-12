@@ -57,6 +57,9 @@ metrics-exporter-prometheus = { version = "0.16", default-features = false, feat
 uuid = { version = "1.23.1", features = ["v4"] }
 tower-http = { version = "0.6.11", features = ["cors"] }
 
+[dev-dependencies]
+tempfile = "3"
+
 [profile.dev]
 debug = 0
 incremental = false

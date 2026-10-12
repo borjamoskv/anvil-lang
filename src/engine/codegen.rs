@@ -44,7 +44,9 @@ pub fn generate_rust(program: &Program) -> String {
         out.push_str("        }\n");
         out.push_str("        self.offset.set(aligned + aligned_size);\n");
         out.push_str("        unsafe {\n");
-        out.push_str("            let ptr = self.buffer.as_ptr().cast::<u8>().add(aligned).cast::<T>();\n");
+        out.push_str(
+            "            let ptr = self.buffer.as_ptr().cast::<u8>().add(aligned).cast::<T>();\n",
+        );
         out.push_str("            ptr.write(value);\n");
         out.push_str("            ptr\n");
         out.push_str("        }\n");

@@ -33,7 +33,7 @@ impl<T: PartialEq + Clone> IdentityPath<T> {
 pub struct InfinityGroupoid<T> {
     pub points: Vec<T>, // 0-cells (Objects/Types)
     pub paths: Vec<IdentityPath<T>>, // 1-cells (Equivalences)
-    // Higher order paths (homotopies) are deferred to lazy evaluation (JIT compilation).
+                        // Higher order paths (homotopies) are deferred to lazy evaluation (JIT compilation).
 }
 
 impl<T: PartialEq + Clone> Default for InfinityGroupoid<T> {
@@ -62,15 +62,19 @@ impl<T: PartialEq + Clone> InfinityGroupoid<T> {
     }
 }
 
-/// The Univalence Axiom trait. 
+/// The Univalence Axiom trait.
 /// (A = B) ≃ (A ≃ B). If two types are equivalent, they are identical in the topological universe.
 pub trait Univalence {
     /// Generates a topological path proving equivalence between self and other.
-    fn prove_equivalence(&self, other: &Self) -> Option<IdentityPath<Self>> where Self: Sized;
-    
+    fn prove_equivalence(&self, other: &Self) -> Option<IdentityPath<Self>>
+    where
+        Self: Sized;
+
     /// Fuses two isomorphic structures into the same topological memory pointer,
     /// fulfilling the univalence axiom.
-    fn univalent_collapse(self, other: Self) -> Result<Self, String> where Self: Sized;
+    fn univalent_collapse(self, other: Self) -> Result<Self, String>
+    where
+        Self: Sized;
 }
 
 /// Anergy Check: Ensure topological structures don't degrade into boolean sets.
@@ -88,7 +92,7 @@ mod stress_tests {
         // C5-REAL: Execution test for massive homotopy type topologies
         let mut groupoid: InfinityGroupoid<usize> = InfinityGroupoid::new();
         let num_nodes = 1_000_000;
-        
+
         let start_inject = Instant::now();
         for i in 0..num_nodes {
             groupoid.inject_0_cell(i);
@@ -101,11 +105,15 @@ mod stress_tests {
             groupoid.establish_1_cell_equivalence(i, i + 1);
         }
         let duration_paths = start_paths.elapsed();
-        println!("Established {} 1-cells in {:?}", num_nodes - 1, duration_paths);
+        println!(
+            "Established {} 1-cells in {:?}",
+            num_nodes - 1,
+            duration_paths
+        );
 
         assert_eq!(groupoid.points.len(), num_nodes);
         assert_eq!(groupoid.paths.len(), num_nodes - 1);
-        
+
         // Assert univalence path structure
         let path = &groupoid.paths[0];
         assert_eq!(path.origin, 0);

@@ -895,7 +895,10 @@ fn infer_expr_type_for_verifier(expr: &Expr, var_types: &HashMap<String, Type>) 
             match arena_ty {
                 Some(Type::Arena(_)) => {
                     let val_ty = infer_expr_type_for_verifier(value, var_types)?;
-                    Some(Type::Named(format!("*{}", format_type_for_verifier(&val_ty))))
+                    Some(Type::Named(format!(
+                        "*{}",
+                        format_type_for_verifier(&val_ty)
+                    )))
                 }
                 _ => None,
             }
@@ -919,8 +922,12 @@ fn encode_body_effects<'ctx>(
     signed_vars: &HashSet<String>,
     struct_sizes: HashMap<String, usize>,
 ) -> BodyEncoding<'ctx> {
-    let mut encoding =
-        BodyEncoding::new(pre_vars.clone(), param_types.clone(), signed_vars.clone(), struct_sizes);
+    let mut encoding = BodyEncoding::new(
+        pre_vars.clone(),
+        param_types.clone(),
+        signed_vars.clone(),
+        struct_sizes,
+    );
     encode_block(ctx, solver, body, &mut encoding);
 
     // Final step: connect the last SSA value of each modified variable to post_var.
@@ -1075,9 +1082,12 @@ fn encode_block<'ctx>(
                     let offset_name = format!("{}_offset", name);
                     let offset_val = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH);
                     encoding.current_vars.insert(offset_name, offset_val);
-                    encoding.var_types.insert(name.clone(), Type::Arena(*capacity));
+                    encoding
+                        .var_types
+                        .insert(name.clone(), Type::Arena(*capacity));
 
-                    let local_var = BV::new_const(ctx, format!("local_{}", name).as_str(), SOLVER_BV_WIDTH);
+                    let local_var =
+                        BV::new_const(ctx, format!("local_{}", name).as_str(), SOLVER_BV_WIDTH);
                     solver.assert(&local_var._eq(&BV::from_i64(ctx, 0, SOLVER_BV_WIDTH)));
                     encoding.current_vars.insert(name.clone(), local_var);
                 } else if let Some(z3_val) =
@@ -1446,7 +1456,8 @@ fn encode_block<'ctx>(
                 }
             }
             Stmt::Return(Some(expr)) => {
-                let z3_val_opt = expr_to_z3(ctx, expr, &encoding.current_vars, &encoding.signed_vars);
+                let z3_val_opt =
+                    expr_to_z3(ctx, expr, &encoding.current_vars, &encoding.signed_vars);
                 process_alloc_side_effects(expr, ctx, solver, encoding);
                 if let Some(z3_val) = z3_val_opt {
                     encoding.current_vars.insert("result".to_string(), z3_val);
@@ -2949,10 +2960,14 @@ fn simplify_stmt(stmt: &Stmt, constants: &HashMap<String, i128>) -> Stmt {
 
 fn calculate_struct_sizes(program: &Program) -> HashMap<String, usize> {
     let mut sizes = HashMap::new();
-    let mut pending: Vec<&StructDef> = program.items.iter().filter_map(|item| match item {
-        Item::Struct(s) => Some(s),
-        _ => None,
-    }).collect();
+    let mut pending: Vec<&StructDef> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(s) => Some(s),
+            _ => None,
+        })
+        .collect();
 
     // Fixed-point iteration
     let mut progress = true;
@@ -3043,9 +3058,17 @@ fn format_type_for_verifier(ty: &Type) -> String {
         Type::TxHash => "TxHash".into(),
         Type::Gas => "Gas".into(),
         Type::Array(t) => format!("[{}]", format_type_for_verifier(t)),
-        Type::Map(k, v) => format!("Map<{}, {}>", format_type_for_verifier(k), format_type_for_verifier(v)),
+        Type::Map(k, v) => format!(
+            "Map<{}, {}>",
+            format_type_for_verifier(k),
+            format_type_for_verifier(v)
+        ),
         Type::Option(t) => format!("Option<{}>", format_type_for_verifier(t)),
-        Type::Result(t, e) => format!("Result<{}, {}>", format_type_for_verifier(t), format_type_for_verifier(e)),
+        Type::Result(t, e) => format!(
+            "Result<{}, {}>",
+            format_type_for_verifier(t),
+            format_type_for_verifier(e)
+        ),
         Type::Arena(size) => format!("Arena<{}>", size),
         Type::Named(n) => n.clone(),
     }
@@ -3114,7 +3137,9 @@ fn process_alloc_side_effects<'ctx>(
             let ssa_var = encoding.fresh_bv(ctx, &format!("{}_offset_ssa", arena_name));
             solver.assert(&ssa_var._eq(&new_offset));
 
-            encoding.current_vars.insert(offset_var_name.clone(), ssa_var);
+            encoding
+                .current_vars
+                .insert(offset_var_name.clone(), ssa_var);
             encoding.modified.insert(offset_var_name);
         }
         Expr::BinOp { left, right, .. } => {
@@ -3148,4 +3173,3 @@ fn process_alloc_side_effects<'ctx>(
         _ => {}
     }
 }
-

@@ -263,9 +263,14 @@ parse_test!(parse_uniswap_ingested, "uniswap_ingested.anv");
 parse_test!(parse_vacuous, "vacuous.anv");
 parse_test!(parse_arena_alloc, "arena_alloc.anv");
 parse_test!(parse_arena_alloc_safe, "arena_alloc_safe.anv");
-parse_test!(parse_arena_alloc_dynamic_struct, "arena_alloc_dynamic_struct.anv");
-parse_test!(parse_arena_alloc_pointer_field, "arena_alloc_pointer_field.anv");
-
+parse_test!(
+    parse_arena_alloc_dynamic_struct,
+    "arena_alloc_dynamic_struct.anv"
+);
+parse_test!(
+    parse_arena_alloc_pointer_field,
+    "arena_alloc_pointer_field.anv"
+);
 
 // ============================================================
 // PHASE B: Full Pipeline — Verification Result Tests
@@ -311,9 +316,12 @@ fn verify_overflow_proven() {
 #[test]
 fn verify_arena_alloc_pointer_field_proven() {
     let (success, output) = run_anvil_check("arena_alloc_pointer_field.anv");
-    assert!(success, "arena_alloc_pointer_field.anv should verify: {}", output);
+    assert!(
+        success,
+        "arena_alloc_pointer_field.anv should verify: {}",
+        output
+    );
 }
-
 
 // --- Files that should contain REJECTIONS (counterexamples found) ---
 
@@ -333,7 +341,11 @@ fn verify_reentrancy_rejected() {
 #[test]
 fn verify_arena_alloc_mixed() {
     let (success, output) = run_anvil_check("arena_alloc.anv");
-    assert!(!success, "arena_alloc.anv verification should fail: {}", output);
+    assert!(
+        !success,
+        "arena_alloc.anv verification should fail: {}",
+        output
+    );
     assert!(
         output.contains("can exceed capacity") || output.contains("OOM"),
         "Expected OOM error message: {}",
@@ -344,7 +356,11 @@ fn verify_arena_alloc_mixed() {
 #[test]
 fn verify_arena_alloc_dynamic_struct_rejected() {
     let (success, output) = run_anvil_check("arena_alloc_dynamic_struct.anv");
-    assert!(!success, "arena_alloc_dynamic_struct.anv typechecking should fail: {}", output);
+    assert!(
+        !success,
+        "arena_alloc_dynamic_struct.anv typechecking should fail: {}",
+        output
+    );
     assert!(
         output.contains("Cannot allocate dynamic type") || output.contains("DynamicStruct"),
         "Expected typechecking error on dynamic struct allocation: {}",
@@ -510,39 +526,62 @@ fn build_hello_rust() {
 #[test]
 fn build_arena_alloc_rust() {
     let (success, output) = run_anvil_build("arena_alloc_safe.anv", "rust");
-    assert!(success, "arena_alloc_safe.anv should build to Rust: {}", output);
+    assert!(
+        success,
+        "arena_alloc_safe.anv should build to Rust: {}",
+        output
+    );
 }
 
 #[test]
 fn build_arena_alloc_llvm() {
     let (success, output) = run_anvil_build("arena_alloc_safe.anv", "llvm");
-    assert!(success, "arena_alloc_safe.anv should build to LLVM: {}", output);
+    assert!(
+        success,
+        "arena_alloc_safe.anv should build to LLVM: {}",
+        output
+    );
 }
 
 #[test]
 fn build_arena_alloc_silicon() {
     let (success, output) = run_anvil_build("arena_alloc_safe.anv", "silicon");
-    assert!(success, "arena_alloc_safe.anv should build to Silicon: {}", output);
+    assert!(
+        success,
+        "arena_alloc_safe.anv should build to Silicon: {}",
+        output
+    );
 }
 
 #[test]
 fn build_arena_alloc_pointer_field_rust() {
     let (success, output) = run_anvil_build("arena_alloc_pointer_field.anv", "rust");
-    assert!(success, "arena_alloc_pointer_field.anv should build to Rust: {}", output);
+    assert!(
+        success,
+        "arena_alloc_pointer_field.anv should build to Rust: {}",
+        output
+    );
 }
 
 #[test]
 fn build_arena_alloc_pointer_field_llvm() {
     let (success, output) = run_anvil_build("arena_alloc_pointer_field.anv", "llvm");
-    assert!(success, "arena_alloc_pointer_field.anv should build to LLVM: {}", output);
+    assert!(
+        success,
+        "arena_alloc_pointer_field.anv should build to LLVM: {}",
+        output
+    );
 }
 
 #[test]
 fn build_arena_alloc_pointer_field_silicon() {
     let (success, output) = run_anvil_build("arena_alloc_pointer_field.anv", "silicon");
-    assert!(success, "arena_alloc_pointer_field.anv should build to Silicon: {}", output);
+    assert!(
+        success,
+        "arena_alloc_pointer_field.anv should build to Silicon: {}",
+        output
+    );
 }
-
 
 // ============================================================
 // PHASE D: Regression Tests for Specific Bugs
@@ -1807,12 +1846,44 @@ fn test_saas_build_endpoint_via_cli() {
     let _guard = anvil_cli_lock().lock().unwrap_or_else(|e| e.into_inner());
     let binary = anvil_binary();
 
-    let port = "18482";
+    let workspace = tempfile::tempdir().expect("Failed to create isolated SaaS workspace");
+    let db_url = format!(
+        "sqlite:{}?mode=rwc",
+        workspace.path().join("anvil.db").display()
+    );
+    let runtime = tokio::runtime::Runtime::new().expect("Failed to create SQLite setup runtime");
+    runtime.block_on(async {
+        let pool = sqlx::sqlite::SqlitePool::connect(&db_url)
+            .await
+            .expect("Failed to create test database");
+        sqlx::query(
+            "CREATE TABLE exergy_keys (
+                key_id TEXT PRIMARY KEY,
+                owner_id TEXT NOT NULL,
+                tier TEXT DEFAULT 'SOVEREIGN',
+                status TEXT DEFAULT 'ACTIVE'
+            )",
+        )
+        .execute(&pool)
+        .await
+        .expect("Failed to create test key table");
+        pool.close().await;
+    });
+
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .expect("Failed to reserve test port")
+        .local_addr()
+        .expect("Failed to read test port")
+        .port()
+        .to_string();
     let health_url = format!("http://127.0.0.1:{}/health", port);
     let build_url = format!("http://127.0.0.1:{}/v1/build", port);
 
     // Add key for authorization
     let mut key_cmd = Command::new(&binary);
+    key_cmd
+        .current_dir(workspace.path())
+        .env("DATABASE_URL", &db_url);
     key_cmd.args([
         "keys",
         "add",
@@ -1826,19 +1897,41 @@ fn test_saas_build_endpoint_via_cli() {
     let key_output = key_cmd.output().expect("Failed to add key");
     assert!(
         key_output.status.success()
-            || String::from_utf8_lossy(&key_output.stderr).contains("UNIQUE constraint failed")
+            && String::from_utf8_lossy(&key_output.stdout).contains("Added key"),
+        "Failed to add isolated test key:\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&key_output.stdout),
+        String::from_utf8_lossy(&key_output.stderr)
     );
 
     // Start SaaS server
     let mut saas_cmd = Command::new(&binary);
-    saas_cmd.args(["saas", "--port", port]);
-    let mut child = saas_cmd.spawn().expect("Failed to spawn saas server");
+    saas_cmd
+        .current_dir(workspace.path())
+        .env("DATABASE_URL", &db_url);
+    saas_cmd.args(["saas", "--port", &port]);
+    struct TestServer(std::process::Child);
+    impl Drop for TestServer {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let _server = TestServer(saas_cmd.spawn().expect("Failed to spawn saas server"));
 
     // Poll health check
     let mut online = false;
     for _ in 0..40 {
         let mut curl_cmd = Command::new("curl");
-        curl_cmd.args(["-s", "-o", "/dev/null", "-w", "%{http_code}", &health_url]);
+        curl_cmd.args([
+            "--max-time",
+            "2",
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            &health_url,
+        ]);
         if let Ok(output) = curl_cmd.output() {
             let status = String::from_utf8_lossy(&output.stdout);
             if status.trim() == "200" {
@@ -1849,11 +1942,7 @@ fn test_saas_build_endpoint_via_cli() {
         std::thread::sleep(std::time::Duration::from_millis(250));
     }
 
-    if !online {
-        let _ = child.kill();
-        let _ = child.wait();
-        panic!("SaaS server failed to start within timeout");
-    }
+    assert!(online, "SaaS server failed to start within timeout");
 
     // Call build endpoint
     let request_body = serde_json::json!({
@@ -1863,6 +1952,8 @@ fn test_saas_build_endpoint_via_cli() {
 
     let mut curl_cmd = Command::new("curl");
     curl_cmd.args([
+        "--max-time",
+        "15",
         "-s",
         "-X",
         "POST",
@@ -1878,9 +1969,6 @@ fn test_saas_build_endpoint_via_cli() {
     let build_output = curl_cmd
         .output()
         .expect("Failed to execute curl post to build");
-
-    let _ = child.kill();
-    let _ = child.wait();
 
     assert!(build_output.status.success(), "curl failed");
     let response_str = String::from_utf8_lossy(&build_output.stdout).to_string();

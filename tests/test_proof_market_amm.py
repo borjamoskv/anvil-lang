@@ -1,7 +1,8 @@
 import json
+import signal
 import sys
 
-from test_proof_market import Oracle, assert_response, post_json
+from test_proof_market import Oracle, assert_response, exit_on_signal, post_json
 
 
 AMM_VULNERABLE_CODE = """
@@ -10,7 +11,7 @@ struct AMMPool {
     reserve_y: u64
 }
 
-fn swap(reserve_x: u64, reserve_y: u64, amount_in_x: u64, amount_out_y: u64) -> u64
+fn swap(mut reserve_x: u64, mut reserve_y: u64, amount_in_x: u64, amount_out_y: u64) -> u64
     where {
         reserve_x > 0,
         reserve_y > 0,
@@ -54,4 +55,5 @@ def test_proof_market_amm_counterexample():
 
 
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, exit_on_signal)
     main()

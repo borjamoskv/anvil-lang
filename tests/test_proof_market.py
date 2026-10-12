@@ -149,7 +149,7 @@ class Oracle:
         )
         try:
             wait_for_oracle(self.process, f"{self.base_url}/health")
-        except Exception:
+        except (RuntimeError, TimeoutError, SystemExit, KeyboardInterrupt):
             self.__exit__(None, None, None)
             raise
         return self
@@ -340,5 +340,10 @@ def test_proof_market_http_flow():
     main()
 
 
+def exit_on_signal(signum: int, _frame: object) -> None:
+    raise SystemExit(128 + signum)
+
+
 if __name__ == "__main__":
+    signal.signal(signal.SIGTERM, exit_on_signal)
     main()

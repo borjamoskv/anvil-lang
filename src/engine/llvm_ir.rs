@@ -129,7 +129,8 @@ fn gen_llvm_stmt(
             }
 
             let inferred_ty = gen_llvm_type(&Some(inferred_ty_val));
-            let (val_str, next_vreg) = gen_llvm_expr(value, *vreg, out, var_types, arena_offsets, struct_sizes);
+            let (val_str, next_vreg) =
+                gen_llvm_expr(value, *vreg, out, var_types, arena_offsets, struct_sizes);
             *vreg = next_vreg;
             out.push_str(&format!("  %_{} = alloca {}\n", name, inferred_ty));
             out.push_str(&format!(
@@ -144,7 +145,8 @@ fn gen_llvm_stmt(
                 _ => "unknown".to_string(),
             };
 
-            let (val_str, next_vreg) = gen_llvm_expr(value, *vreg, out, var_types, arena_offsets, struct_sizes);
+            let (val_str, next_vreg) =
+                gen_llvm_expr(value, *vreg, out, var_types, arena_offsets, struct_sizes);
             *vreg = next_vreg;
 
             match op {
@@ -274,7 +276,8 @@ fn gen_llvm_stmt(
             }
         }
         Stmt::Return(Some(expr)) => {
-            let (val_str, next_vreg) = gen_llvm_expr(expr, *vreg, out, var_types, arena_offsets, struct_sizes);
+            let (val_str, next_vreg) =
+                gen_llvm_expr(expr, *vreg, out, var_types, arena_offsets, struct_sizes);
             *vreg = next_vreg;
             out.push_str(&format!("  ret {} {}\n", ret_ty, val_str));
         }
@@ -291,7 +294,14 @@ fn gen_llvm_stmt(
             let merge_label = format!("merge_{}", *labels);
             *labels += 1;
 
-            let (cond_str, next_vreg) = gen_llvm_cond(condition, *vreg, out, var_types, arena_offsets, struct_sizes);
+            let (cond_str, next_vreg) = gen_llvm_cond(
+                condition,
+                *vreg,
+                out,
+                var_types,
+                arena_offsets,
+                struct_sizes,
+            );
             *vreg = next_vreg;
 
             if else_block.is_some() {
@@ -308,14 +318,32 @@ fn gen_llvm_stmt(
 
             out.push_str(&format!("{}:\n", then_label));
             for s in &then_block.stmts {
-                gen_llvm_stmt(s, ret_ty, vreg, labels, out, var_types, arena_offsets, struct_sizes);
+                gen_llvm_stmt(
+                    s,
+                    ret_ty,
+                    vreg,
+                    labels,
+                    out,
+                    var_types,
+                    arena_offsets,
+                    struct_sizes,
+                );
             }
             out.push_str(&format!("  br label %{}\n", merge_label));
 
             if let Some(eb) = else_block {
                 out.push_str(&format!("{}:\n", else_label));
                 for s in &eb.stmts {
-                    gen_llvm_stmt(s, ret_ty, vreg, labels, out, var_types, arena_offsets, struct_sizes);
+                    gen_llvm_stmt(
+                        s,
+                        ret_ty,
+                        vreg,
+                        labels,
+                        out,
+                        var_types,
+                        arena_offsets,
+                        struct_sizes,
+                    );
                 }
                 out.push_str(&format!("  br label %{}\n", merge_label));
             }
@@ -333,7 +361,14 @@ fn gen_llvm_stmt(
             out.push_str(&format!("  br label %{}\n", header_label));
             out.push_str(&format!("{}:\n", header_label));
 
-            let (cond_str, next_vreg) = gen_llvm_cond(condition, *vreg, out, var_types, arena_offsets, struct_sizes);
+            let (cond_str, next_vreg) = gen_llvm_cond(
+                condition,
+                *vreg,
+                out,
+                var_types,
+                arena_offsets,
+                struct_sizes,
+            );
             *vreg = next_vreg;
             out.push_str(&format!(
                 "  br i1 {}, label %{}, label %{}\n",
@@ -342,7 +377,16 @@ fn gen_llvm_stmt(
 
             out.push_str(&format!("{}:\n", body_label));
             for s in &body.stmts {
-                gen_llvm_stmt(s, ret_ty, vreg, labels, out, var_types, arena_offsets, struct_sizes);
+                gen_llvm_stmt(
+                    s,
+                    ret_ty,
+                    vreg,
+                    labels,
+                    out,
+                    var_types,
+                    arena_offsets,
+                    struct_sizes,
+                );
             }
             out.push_str(&format!("  br label %{}\n", header_label));
 
@@ -353,7 +397,14 @@ fn gen_llvm_stmt(
             let fail_label = format!("assert_fail_{}", *labels);
             *labels += 1;
 
-            let (cond_str, next_vreg) = gen_llvm_cond(condition, *vreg, out, var_types, arena_offsets, struct_sizes);
+            let (cond_str, next_vreg) = gen_llvm_cond(
+                condition,
+                *vreg,
+                out,
+                var_types,
+                arena_offsets,
+                struct_sizes,
+            );
             *vreg = next_vreg;
             out.push_str(&format!(
                 "  br i1 {}, label %{}, label %{}\n",
@@ -419,9 +470,11 @@ fn gen_llvm_cond(
 ) -> (String, usize) {
     match expr {
         Expr::BinOp { left, op, right } => {
-            let (l_str, next) = gen_llvm_expr(left, vreg, out, var_types, arena_offsets, struct_sizes);
+            let (l_str, next) =
+                gen_llvm_expr(left, vreg, out, var_types, arena_offsets, struct_sizes);
             vreg = next;
-            let (r_str, next) = gen_llvm_expr(right, vreg, out, var_types, arena_offsets, struct_sizes);
+            let (r_str, next) =
+                gen_llvm_expr(right, vreg, out, var_types, arena_offsets, struct_sizes);
             vreg = next;
             let cmp_op = match op {
                 BinOp::Gt => "sgt",
@@ -464,8 +517,10 @@ fn gen_llvm_expr(
             (format!("%{}", load_reg), vreg + 1)
         }
         Expr::BinOp { left, op, right } => {
-            let (l_str, next) = gen_llvm_expr(left, vreg, out, var_types, arena_offsets, struct_sizes);
-            let (r_str, next2) = gen_llvm_expr(right, next, out, var_types, arena_offsets, struct_sizes);
+            let (l_str, next) =
+                gen_llvm_expr(left, vreg, out, var_types, arena_offsets, struct_sizes);
+            let (r_str, next2) =
+                gen_llvm_expr(right, next, out, var_types, arena_offsets, struct_sizes);
             let llvm_op = match op {
                 BinOp::Add => "add",
                 BinOp::Sub => "sub",
@@ -505,7 +560,8 @@ fn gen_llvm_expr(
             (format!("%{}", next2), next2 + 1)
         }
         Expr::UnaryOp { op, operand } => {
-            let (val_str, next) = gen_llvm_expr(operand, vreg, out, var_types, arena_offsets, struct_sizes);
+            let (val_str, next) =
+                gen_llvm_expr(operand, vreg, out, var_types, arena_offsets, struct_sizes);
             match op {
                 UnaryOp::Neg => {
                     out.push_str(&format!("  %{} = sub i64 0, {}\n", next, val_str));
@@ -524,7 +580,14 @@ fn gen_llvm_expr(
             let mut arg_strs = Vec::new();
             let mut current_vreg = vreg;
             for arg in args {
-                let (a_str, next) = gen_llvm_expr(arg, current_vreg, out, var_types, arena_offsets, struct_sizes);
+                let (a_str, next) = gen_llvm_expr(
+                    arg,
+                    current_vreg,
+                    out,
+                    var_types,
+                    arena_offsets,
+                    struct_sizes,
+                );
                 arg_strs.push(format!("i64 {}", a_str));
                 current_vreg = next;
             }
@@ -565,7 +628,8 @@ fn gen_llvm_expr(
             let aligned_size = (size + 7) & !7;
             arena_offsets.insert(arena_name.clone(), current_offset + aligned_size);
 
-            let (val_str, next_vreg) = gen_llvm_expr(value, vreg, out, var_types, arena_offsets, struct_sizes);
+            let (val_str, next_vreg) =
+                gen_llvm_expr(value, vreg, out, var_types, arena_offsets, struct_sizes);
             let gep_reg = next_vreg;
 
             let ty_str = gen_llvm_type(&Some(value_ty));
@@ -586,10 +650,14 @@ fn gen_llvm_expr(
 
 fn calculate_llvm_struct_sizes(program: &Program) -> HashMap<String, usize> {
     let mut sizes = HashMap::new();
-    let mut pending: Vec<&StructDef> = program.items.iter().filter_map(|item| match item {
-        Item::Struct(s) => Some(s),
-        _ => None,
-    }).collect();
+    let mut pending: Vec<&StructDef> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            Item::Struct(s) => Some(s),
+            _ => None,
+        })
+        .collect();
 
     // Fixed-point iteration
     let mut progress = true;
@@ -685,27 +753,25 @@ fn infer_expr_type_llvm(expr: &Expr, var_types: &HashMap<String, Type>) -> Optio
         Expr::StringLit(_) => Some(Type::String),
         Expr::AddressLit(_) => Some(Type::Address),
         Expr::Ident(name) => var_types.get(name.trim()).cloned(),
-        Expr::BinOp { left, op, right } => {
-            match op {
-                BinOp::Eq
-                | BinOp::Neq
-                | BinOp::Lt
-                | BinOp::Gt
-                | BinOp::Lte
-                | BinOp::Gte
-                | BinOp::And
-                | BinOp::Or => Some(Type::Bool),
-                _ => {
-                    let lt = infer_expr_type_llvm(left, var_types);
-                    let rt = infer_expr_type_llvm(right, var_types);
-                    match (lt, rt) {
-                        (Some(l), Some(r)) => Some(promote_types_llvm(&l, &r)),
-                        (Some(t), None) | (None, Some(t)) => Some(t),
-                        _ => None,
-                    }
+        Expr::BinOp { left, op, right } => match op {
+            BinOp::Eq
+            | BinOp::Neq
+            | BinOp::Lt
+            | BinOp::Gt
+            | BinOp::Lte
+            | BinOp::Gte
+            | BinOp::And
+            | BinOp::Or => Some(Type::Bool),
+            _ => {
+                let lt = infer_expr_type_llvm(left, var_types);
+                let rt = infer_expr_type_llvm(right, var_types);
+                match (lt, rt) {
+                    (Some(l), Some(r)) => Some(promote_types_llvm(&l, &r)),
+                    (Some(t), None) | (None, Some(t)) => Some(t),
+                    _ => None,
                 }
             }
-        }
+        },
         Expr::UnaryOp { op, operand } => match op {
             UnaryOp::Not => Some(Type::Bool),
             UnaryOp::Neg => {
@@ -750,7 +816,10 @@ fn type_rank_llvm(ty: &Type) -> u32 {
 }
 
 fn is_signed_llvm(ty: &Type) -> bool {
-    matches!(ty, Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128)
+    matches!(
+        ty,
+        Type::I8 | Type::I16 | Type::I32 | Type::I64 | Type::I128
+    )
 }
 
 fn format_type_llvm(ty: &Type) -> String {

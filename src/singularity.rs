@@ -150,29 +150,29 @@ pub fn synthesize_ast_to_verilog(program: &crate::core::ast::Program) -> String 
                     let inferred_ty = ty.clone().unwrap_or(crate::core::ast::Type::Unit);
                     var_types.insert(name.clone(), inferred_ty.clone());
                     if let crate::core::ast::Type::Arena(size) = inferred_ty {
-                        verilog.push_str(&format!("    reg [7:0] memory_{} [0:{}];\n", name, size - 1));
+                        verilog.push_str(&format!(
+                            "    reg [7:0] memory_{} [0:{}];\n",
+                            name,
+                            size - 1
+                        ));
                         arena_offsets.insert(name.clone(), 0);
                     } else {
-                        let width =
-                            match inferred_ty {
-                                crate::core::ast::Type::U8 | crate::core::ast::Type::I8 => {
-                                    "[7:0]"
-                                }
-                                crate::core::ast::Type::U16
-                                | crate::core::ast::Type::I16 => "[15:0]",
-                                crate::core::ast::Type::U32
-                                | crate::core::ast::Type::I32 => "[31:0]",
-                                crate::core::ast::Type::U64
-                                | crate::core::ast::Type::I64
-                                | crate::core::ast::Type::Gas => "[63:0]",
-                                crate::core::ast::Type::U128
-                                | crate::core::ast::Type::I128 => "[127:0]",
-                                crate::core::ast::Type::U256
-                                | crate::core::ast::Type::Wallet
-                                | crate::core::ast::Type::TxHash => "[255:0]",
-                                crate::core::ast::Type::Bool => "",
-                                _ => "[63:0]",
-                            };
+                        let width = match inferred_ty {
+                            crate::core::ast::Type::U8 | crate::core::ast::Type::I8 => "[7:0]",
+                            crate::core::ast::Type::U16 | crate::core::ast::Type::I16 => "[15:0]",
+                            crate::core::ast::Type::U32 | crate::core::ast::Type::I32 => "[31:0]",
+                            crate::core::ast::Type::U64
+                            | crate::core::ast::Type::I64
+                            | crate::core::ast::Type::Gas => "[63:0]",
+                            crate::core::ast::Type::U128 | crate::core::ast::Type::I128 => {
+                                "[127:0]"
+                            }
+                            crate::core::ast::Type::U256
+                            | crate::core::ast::Type::Wallet
+                            | crate::core::ast::Type::TxHash => "[255:0]",
+                            crate::core::ast::Type::Bool => "",
+                            _ => "[63:0]",
+                        };
                         verilog.push_str(&format!("    reg {} reg_{};\n", width, name));
                     }
                 }
@@ -187,7 +187,10 @@ pub fn synthesize_ast_to_verilog(program: &crate::core::ast::Program) -> String 
             for stmt in &f.body.stmts {
                 if let crate::core::ast::Stmt::Let { name, ty, .. } = stmt {
                     if let Some(crate::core::ast::Type::Arena(_)) = ty {
-                        verilog.push_str(&format!("            // memory_{} reset handled implicitly\n", name));
+                        verilog.push_str(&format!(
+                            "            // memory_{} reset handled implicitly\n",
+                            name
+                        ));
                     } else {
                         verilog.push_str(&format!("            reg_{} <= 0;\n", name));
                     }
@@ -198,26 +201,48 @@ pub fn synthesize_ast_to_verilog(program: &crate::core::ast::Program) -> String 
             // Translate statements to RTL-style sequential updates
             for stmt in &f.body.stmts {
                 match stmt {
-                    crate::core::ast::Stmt::Let { name, value, ty, .. } => {
+                    crate::core::ast::Stmt::Let {
+                        name, value, ty, ..
+                    } => {
                         if let Some(crate::core::ast::Type::Arena(_)) = ty {
                             // Arena declaration generates no runtime assignment
-                        } else if let crate::core::ast::Expr::Alloc { arena, value: val_expr } = value {
+                        } else if let crate::core::ast::Expr::Alloc {
+                            arena,
+                            value: val_expr,
+                        } = value
+                        {
                             let arena_name = match &**arena {
                                 crate::core::ast::Expr::Ident(n) => n.clone(),
                                 _ => "unknown".to_string(),
                             };
                             let current_offset = *arena_offsets.get(&arena_name).unwrap_or(&0);
-                            let value_ty = infer_expr_type_verilog(val_expr, &var_types).unwrap_or(crate::core::ast::Type::U64);
+                            let value_ty = infer_expr_type_verilog(val_expr, &var_types)
+                                .unwrap_or(crate::core::ast::Type::U64);
                             let size = verilog_type_size(&value_ty, &struct_sizes);
 
-                            let val_str = verilog_expr(val_expr, &mut arena_offsets, &var_types, &struct_sizes);
-                            verilog.push_str(&gen_verilog_memory_writes(&arena_name, &val_str, current_offset, size));
-                            verilog.push_str(&format!("            reg_{} <= {};\n", name, current_offset));
+                            let val_str = verilog_expr(
+                                val_expr,
+                                &mut arena_offsets,
+                                &var_types,
+                                &struct_sizes,
+                            );
+                            verilog.push_str(&gen_verilog_memory_writes(
+                                &arena_name,
+                                &val_str,
+                                current_offset,
+                                size,
+                            ));
+                            verilog.push_str(&format!(
+                                "            reg_{} <= {};\n",
+                                name, current_offset
+                            ));
 
                             arena_offsets.insert(arena_name, current_offset + ((size + 7) & !7));
                         } else {
-                            let val_str = verilog_expr(value, &mut arena_offsets, &var_types, &struct_sizes);
-                            verilog.push_str(&format!("            reg_{} <= {};\n", name, val_str));
+                            let val_str =
+                                verilog_expr(value, &mut arena_offsets, &var_types, &struct_sizes);
+                            verilog
+                                .push_str(&format!("            reg_{} <= {};\n", name, val_str));
                         }
                     }
                     crate::core::ast::Stmt::Assign { target, op, value } => {
@@ -225,22 +250,41 @@ pub fn synthesize_ast_to_verilog(program: &crate::core::ast::Program) -> String 
                             crate::core::ast::LValue::Ident(n) => n.clone(),
                             _ => "unknown".to_string(),
                         };
-                        if let crate::core::ast::Expr::Alloc { arena, value: val_expr } = value {
+                        if let crate::core::ast::Expr::Alloc {
+                            arena,
+                            value: val_expr,
+                        } = value
+                        {
                             let arena_name = match &**arena {
                                 crate::core::ast::Expr::Ident(n) => n.clone(),
                                 _ => "unknown".to_string(),
                             };
                             let current_offset = *arena_offsets.get(&arena_name).unwrap_or(&0);
-                            let value_ty = infer_expr_type_verilog(val_expr, &var_types).unwrap_or(crate::core::ast::Type::U64);
+                            let value_ty = infer_expr_type_verilog(val_expr, &var_types)
+                                .unwrap_or(crate::core::ast::Type::U64);
                             let size = verilog_type_size(&value_ty, &struct_sizes);
 
-                            let val_str = verilog_expr(val_expr, &mut arena_offsets, &var_types, &struct_sizes);
-                            verilog.push_str(&gen_verilog_memory_writes(&arena_name, &val_str, current_offset, size));
-                            verilog.push_str(&format!("            {} <= {};\n", target_name, current_offset));
+                            let val_str = verilog_expr(
+                                val_expr,
+                                &mut arena_offsets,
+                                &var_types,
+                                &struct_sizes,
+                            );
+                            verilog.push_str(&gen_verilog_memory_writes(
+                                &arena_name,
+                                &val_str,
+                                current_offset,
+                                size,
+                            ));
+                            verilog.push_str(&format!(
+                                "            {} <= {};\n",
+                                target_name, current_offset
+                            ));
 
                             arena_offsets.insert(arena_name, current_offset + ((size + 7) & !7));
                         } else {
-                            let val_str = verilog_expr(value, &mut arena_offsets, &var_types, &struct_sizes);
+                            let val_str =
+                                verilog_expr(value, &mut arena_offsets, &var_types, &struct_sizes);
                             let op_symbol = match op {
                                 crate::core::ast::AssignOp::Assign => "",
                                 crate::core::ast::AssignOp::AddAssign => " +",
@@ -267,22 +311,46 @@ pub fn synthesize_ast_to_verilog(program: &crate::core::ast::Program) -> String 
                     }
                     crate::core::ast::Stmt::Return(opt_expr) => {
                         if let Some(expr) = opt_expr {
-                            if let crate::core::ast::Expr::Alloc { arena, value: val_expr } = expr {
+                            if let crate::core::ast::Expr::Alloc {
+                                arena,
+                                value: val_expr,
+                            } = expr
+                            {
                                 let arena_name = match &**arena {
                                     crate::core::ast::Expr::Ident(n) => n.clone(),
                                     _ => "unknown".to_string(),
                                 };
                                 let current_offset = *arena_offsets.get(&arena_name).unwrap_or(&0);
-                                let value_ty = infer_expr_type_verilog(val_expr, &var_types).unwrap_or(crate::core::ast::Type::U64);
+                                let value_ty = infer_expr_type_verilog(val_expr, &var_types)
+                                    .unwrap_or(crate::core::ast::Type::U64);
                                 let size = verilog_type_size(&value_ty, &struct_sizes);
 
-                                let val_str = verilog_expr(val_expr, &mut arena_offsets, &var_types, &struct_sizes);
-                                verilog.push_str(&gen_verilog_memory_writes(&arena_name, &val_str, current_offset, size));
-                                verilog.push_str(&format!("            out_val <= {};\n", current_offset));
+                                let val_str = verilog_expr(
+                                    val_expr,
+                                    &mut arena_offsets,
+                                    &var_types,
+                                    &struct_sizes,
+                                );
+                                verilog.push_str(&gen_verilog_memory_writes(
+                                    &arena_name,
+                                    &val_str,
+                                    current_offset,
+                                    size,
+                                ));
+                                verilog.push_str(&format!(
+                                    "            out_val <= {};\n",
+                                    current_offset
+                                ));
 
-                                arena_offsets.insert(arena_name, current_offset + ((size + 7) & !7));
+                                arena_offsets
+                                    .insert(arena_name, current_offset + ((size + 7) & !7));
                             } else {
-                                let val_str = verilog_expr(expr, &mut arena_offsets, &var_types, &struct_sizes);
+                                let val_str = verilog_expr(
+                                    expr,
+                                    &mut arena_offsets,
+                                    &var_types,
+                                    &struct_sizes,
+                                );
                                 verilog.push_str(&format!("            out_val <= {};\n", val_str));
                             }
                         }
@@ -334,12 +402,18 @@ fn verilog_expr(
     }
 }
 
-fn calculate_verilog_struct_sizes(program: &crate::core::ast::Program) -> std::collections::HashMap<String, usize> {
+fn calculate_verilog_struct_sizes(
+    program: &crate::core::ast::Program,
+) -> std::collections::HashMap<String, usize> {
     let mut sizes = std::collections::HashMap::new();
-    let mut pending: Vec<&crate::core::ast::StructDef> = program.items.iter().filter_map(|item| match item {
-        crate::core::ast::Item::Struct(s) => Some(s),
-        _ => None,
-    }).collect();
+    let mut pending: Vec<&crate::core::ast::StructDef> = program
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            crate::core::ast::Item::Struct(s) => Some(s),
+            _ => None,
+        })
+        .collect();
 
     let mut progress = true;
     while progress && !pending.is_empty() {
@@ -368,14 +442,24 @@ fn calculate_verilog_struct_sizes(program: &crate::core::ast::Program) -> std::c
     sizes
 }
 
-fn type_size_helper_verilog(ty: &crate::core::ast::Type, struct_sizes: &std::collections::HashMap<String, usize>) -> Option<usize> {
+fn type_size_helper_verilog(
+    ty: &crate::core::ast::Type,
+    struct_sizes: &std::collections::HashMap<String, usize>,
+) -> Option<usize> {
     match ty {
-        crate::core::ast::Type::U8 | crate::core::ast::Type::I8 | crate::core::ast::Type::Bool | crate::core::ast::Type::Unit => Some(1),
+        crate::core::ast::Type::U8
+        | crate::core::ast::Type::I8
+        | crate::core::ast::Type::Bool
+        | crate::core::ast::Type::Unit => Some(1),
         crate::core::ast::Type::U16 | crate::core::ast::Type::I16 => Some(2),
         crate::core::ast::Type::U32 | crate::core::ast::Type::I32 => Some(4),
-        crate::core::ast::Type::U64 | crate::core::ast::Type::I64 | crate::core::ast::Type::Gas => Some(8),
+        crate::core::ast::Type::U64 | crate::core::ast::Type::I64 | crate::core::ast::Type::Gas => {
+            Some(8)
+        }
         crate::core::ast::Type::U128 | crate::core::ast::Type::I128 => Some(16),
-        crate::core::ast::Type::U256 | crate::core::ast::Type::Wallet | crate::core::ast::Type::TxHash => Some(32),
+        crate::core::ast::Type::U256
+        | crate::core::ast::Type::Wallet
+        | crate::core::ast::Type::TxHash => Some(32),
         crate::core::ast::Type::Address => Some(20),
         crate::core::ast::Type::Signature => Some(65),
         crate::core::ast::Type::Named(name) => {
@@ -389,14 +473,24 @@ fn type_size_helper_verilog(ty: &crate::core::ast::Type, struct_sizes: &std::col
     }
 }
 
-fn verilog_type_size(ty: &crate::core::ast::Type, struct_sizes: &std::collections::HashMap<String, usize>) -> usize {
+fn verilog_type_size(
+    ty: &crate::core::ast::Type,
+    struct_sizes: &std::collections::HashMap<String, usize>,
+) -> usize {
     match ty {
-        crate::core::ast::Type::U8 | crate::core::ast::Type::I8 | crate::core::ast::Type::Bool | crate::core::ast::Type::Unit => 1,
+        crate::core::ast::Type::U8
+        | crate::core::ast::Type::I8
+        | crate::core::ast::Type::Bool
+        | crate::core::ast::Type::Unit => 1,
         crate::core::ast::Type::U16 | crate::core::ast::Type::I16 => 2,
         crate::core::ast::Type::U32 | crate::core::ast::Type::I32 => 4,
-        crate::core::ast::Type::U64 | crate::core::ast::Type::I64 | crate::core::ast::Type::Gas => 8,
+        crate::core::ast::Type::U64 | crate::core::ast::Type::I64 | crate::core::ast::Type::Gas => {
+            8
+        }
         crate::core::ast::Type::U128 | crate::core::ast::Type::I128 => 16,
-        crate::core::ast::Type::U256 | crate::core::ast::Type::Wallet | crate::core::ast::Type::TxHash => 32,
+        crate::core::ast::Type::U256
+        | crate::core::ast::Type::Wallet
+        | crate::core::ast::Type::TxHash => 32,
         crate::core::ast::Type::Address => 20,
         crate::core::ast::Type::Signature => 65,
         crate::core::ast::Type::Named(name) => {
@@ -432,37 +526,40 @@ fn infer_expr_type_verilog(
                 Some(crate::core::ast::Type::I128)
             }
         }
-        crate::core::ast::Expr::BigIntLit(_) | crate::core::ast::Expr::HexLit(_) => Some(crate::core::ast::Type::U256),
+        crate::core::ast::Expr::BigIntLit(_) | crate::core::ast::Expr::HexLit(_) => {
+            Some(crate::core::ast::Type::U256)
+        }
         crate::core::ast::Expr::BoolLit(_) => Some(crate::core::ast::Type::Bool),
         crate::core::ast::Expr::StringLit(_) => Some(crate::core::ast::Type::String),
         crate::core::ast::Expr::AddressLit(_) => Some(crate::core::ast::Type::Address),
         crate::core::ast::Expr::Ident(name) => var_types.get(name.trim()).cloned(),
-        crate::core::ast::Expr::BinOp { left, op, right } => {
-            match op {
-                crate::core::ast::BinOp::Eq
-                | crate::core::ast::BinOp::Neq
-                | crate::core::ast::BinOp::Lt
-                | crate::core::ast::BinOp::Gt
-                | crate::core::ast::BinOp::Lte
-                | crate::core::ast::BinOp::Gte
-                | crate::core::ast::BinOp::And
-                | crate::core::ast::BinOp::Or => Some(crate::core::ast::Type::Bool),
-                _ => {
-                    let lt = infer_expr_type_verilog(left, var_types);
-                    let rt = infer_expr_type_verilog(right, var_types);
-                    match (lt, rt) {
-                        (Some(l), Some(r)) => Some(promote_types_verilog(&l, &r)),
-                        (Some(t), None) | (None, Some(t)) => Some(t),
-                        _ => None,
-                    }
+        crate::core::ast::Expr::BinOp { left, op, right } => match op {
+            crate::core::ast::BinOp::Eq
+            | crate::core::ast::BinOp::Neq
+            | crate::core::ast::BinOp::Lt
+            | crate::core::ast::BinOp::Gt
+            | crate::core::ast::BinOp::Lte
+            | crate::core::ast::BinOp::Gte
+            | crate::core::ast::BinOp::And
+            | crate::core::ast::BinOp::Or => Some(crate::core::ast::Type::Bool),
+            _ => {
+                let lt = infer_expr_type_verilog(left, var_types);
+                let rt = infer_expr_type_verilog(right, var_types);
+                match (lt, rt) {
+                    (Some(l), Some(r)) => Some(promote_types_verilog(&l, &r)),
+                    (Some(t), None) | (None, Some(t)) => Some(t),
+                    _ => None,
                 }
             }
-        }
+        },
         _ => None,
     }
 }
 
-fn promote_types_verilog(a: &crate::core::ast::Type, b: &crate::core::ast::Type) -> crate::core::ast::Type {
+fn promote_types_verilog(
+    a: &crate::core::ast::Type,
+    b: &crate::core::ast::Type,
+) -> crate::core::ast::Type {
     let ra = type_rank_verilog(a);
     let rb = type_rank_verilog(b);
     if ra >= rb { a.clone() } else { b.clone() }
@@ -480,7 +577,12 @@ fn type_rank_verilog(ty: &crate::core::ast::Type) -> u32 {
     }
 }
 
-fn gen_verilog_memory_writes(arena_name: &str, value_str: &str, start_offset: usize, size: usize) -> String {
+fn gen_verilog_memory_writes(
+    arena_name: &str,
+    value_str: &str,
+    start_offset: usize,
+    size: usize,
+) -> String {
     let mut writes = String::new();
     for i in 0..size {
         writes.push_str(&format!(

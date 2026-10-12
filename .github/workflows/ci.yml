@@ -51,22 +51,20 @@ jobs:
       with:
         shared-key: quick
 
-    - name: Check Formatting
-      run: |
-        cargo fmt -- --check
-        cargo fmt --manifest-path services/proof-market/Cargo.toml -- --check
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.10'
 
-    - name: Check Root Crate
-      run: cargo check --bin anvil --verbose
+    - name: Run Quick Checks
+      run: scripts/ci-quick.sh
 
-    - name: Check Proof Market Crate
-      run: cargo check --manifest-path services/proof-market/Cargo.toml --verbose
-
-    - name: Run Unit Tests
-      run: cargo test --bin anvil --verbose -- --test-threads=1
-
-    - name: Run Proof Market Unit Tests
-      run: cargo test --manifest-path services/proof-market/Cargo.toml --verbose
+    - name: Upload Check Logs
+      uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: quick-check-logs
+        path: cache/ci/
 
   full:
     name: Full Checks
@@ -87,50 +85,28 @@ jobs:
 
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
 
     - name: Rust Cache
       uses: Swatinem/rust-cache@v2
       with:
         shared-key: full
 
-    - name: Build Debug Binaries
-      run: |
-        cargo build --bin anvil --verbose
-        cargo build --manifest-path services/proof-market/Cargo.toml --bin proof-market --verbose
-
-    - name: Run Proof Market Unit Tests
-      run: cargo test --manifest-path services/proof-market/Cargo.toml --verbose
-
-    - name: Run Rust Integration Tests
-      run: cargo test --test integration_tests --verbose -- --test-threads=1
-
     - name: Set up Python 3.10
       uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
-    - name: Python Proof Market - Vault
-      run: python3 tests/test_proof_market.py
-      env:
-        ANVIL_BIN: ${{ env.CARGO_TARGET_DIR }}/debug/anvil
-        PROOF_MARKET_BIN: ${{ env.CARGO_TARGET_DIR }}/debug/proof-market
+    - name: Run Full Checks
+      run: scripts/ci-full.sh
 
-    - name: Python Proof Market - AMM
-      run: python3 tests/test_proof_market_amm.py
-      env:
-        ANVIL_BIN: ${{ env.CARGO_TARGET_DIR }}/debug/anvil
-        PROOF_MARKET_BIN: ${{ env.CARGO_TARGET_DIR }}/debug/proof-market
-
-    - name: Verify Hello World Example
-      run: cargo run --bin anvil -- check examples/hello.anv
-
-    - name: Verify Transfer Example
-      run: cargo run --bin anvil -- check examples/transfer.anv
-
-    - name: Release Build
-      run: |
-        cargo build --release --bin anvil --verbose
-        cargo build --release --manifest-path services/proof-market/Cargo.toml --bin proof-market --verbose
+    - name: Upload Check Logs
+      uses: actions/upload-artifact@v7
+      if: always()
+      with:
+        name: full-check-logs
+        path: cache/ci/
 
     - name: Generate CORTEX Provenance Manifests
       run: |

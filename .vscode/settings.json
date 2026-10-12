@@ -52,7 +52,7 @@
     "agents-archi-mvp/sdk-ts/node_modules"
   ],
   "rust-analyzer.cargo.allTargets": false,
-  "rust-analyzer.cargo.targetDir": "/Users/borjafernandezangulo/.cache/anvil-lang-target",
+  "rust-analyzer.cargo.targetDir": "target",
   "rust-analyzer.cargo.extraEnv": {
     "CARGO_BUILD_JOBS": "1",
     "CARGO_INCREMENTAL": "0",
