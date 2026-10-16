@@ -1,1 +1,0 @@
-../cortexpersist-monorepo/VERIFICATION.md

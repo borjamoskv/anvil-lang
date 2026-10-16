@@ -72,5 +72,15 @@
     "1",
     "--bin",
     "anvil"
-  ]
+  ],
+  "workbench.colorCustomizations": {
+    "titleBar.activeBackground": "#4F46E5",
+    "titleBar.activeForeground": "#FFFFFF",
+    "statusBar.background": "#4F46E5",
+    "statusBar.foreground": "#FFFFFF",
+    "activityBar.activeBorder": "#FFFFFF",
+    "activityBar.background": "#4F46E5",
+    "activityBar.foreground": "#FFFFFF"
+  },
+  "window.title": "${rootName} • [${activeRepositoryBranchName}] • ${activeEditorShort} — ANTIGRAVITY"
 }

@@ -1,0 +1,52 @@
+// ============================================================
+// ADVERSARIAL EXAMPLE: Flashloan Atomicity (Vector B)
+// 
+// This contract demonstrates the global structural invariant
+// implemented in the Anvil verifier for Flashloans.
+//
+// If a variable named `flashloan_debt` is present, it MUST
+// be 0 at the end of the transaction.
+// ============================================================
+
+// The broken version: user takes a flashloan but fails to repay.
+// The compiler MUST reject it because of the global invariant.
+fn flashloan_broken(mut balance: u64, mut flashloan_debt: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        balance >= amount,
+        flashloan_debt == 0
+    }
+{
+    // Take the loan
+    flashloan_debt = amount;
+    balance += amount;
+    
+    // Simulate some logic...
+    
+    // BUG: We forgot to repay the loan!
+    // flashloan_debt remains > 0.
+    return balance;
+}
+
+// The correct version: user repays the flashloan.
+// The compiler MUST pass this verification.
+fn flashloan_safe(mut balance: u64, mut flashloan_debt: u64, amount: u64) -> u64
+    where {
+        amount > 0,
+        balance >= amount,
+        flashloan_debt == 0
+    }
+{
+    // Take the loan
+    flashloan_debt = amount;
+    balance += amount;
+    
+    // Simulate arbitrage profit
+    balance += 100;
+    
+    // REPAY the loan!
+    flashloan_debt -= amount;
+    balance -= amount;
+    
+    return balance;
+}

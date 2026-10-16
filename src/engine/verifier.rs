@@ -509,6 +509,46 @@ fn verify_function(
         solver.pop(1);
     }
 
+    // Step 3.6: Global Flashloan Atomicity Guard (Structural Defense)
+    // If a transaction involves flashloan_debt, it MUST be fully repaid (0) at post-state.
+    if let (Some(_pre_debt), Some(post_debt)) = (
+        pre_vars.get("flashloan_debt"),
+        post_vars.get("flashloan_debt"),
+    ) {
+        global_invariants_checked += 1;
+        proof_obligations
+            .push("global:flashloan_atomicity:debt_must_be_zero_at_post_state".to_string());
+
+        solver.push();
+        let zero = BV::from_i64(&ctx, 0, SOLVER_BV_WIDTH);
+        let debt_is_zero = post_debt._eq(&zero);
+        solver.assert(&debt_is_zero.not());
+
+        match solver.check() {
+            SatResult::Sat => {
+                all_verified = false;
+                let mut ce = String::from(
+                    "GLOBAL INVARIANT VIOLATED: Flashloan Atomicity broken! (Debt remains unpaid)\n",
+                );
+                let model = solver.get_model().unwrap();
+                append_model_values(&mut ce, &model, &pre_vars, "");
+                append_model_values(&mut ce, &model, &post_vars, "'");
+                if counterexample.is_none() {
+                    counterexample = Some(ce);
+                }
+            }
+            SatResult::Unsat => {}
+            SatResult::Unknown => {
+                all_verified = false;
+                if counterexample.is_none() {
+                    counterexample =
+                        Some("Global invariant Flashloan Atomicity: Z3 undecidable".to_string());
+                }
+            }
+        }
+        solver.pop(1);
+    }
+
     let total_postconditions =
         postconditions.len() + contract_invariants.len() + global_invariants_checked;
 

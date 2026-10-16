@@ -1,1 +1,0 @@
-/Users/borjafernandezangulo/10_PROJECTS/cortexpersist-monorepo/CHANGELOG.md
