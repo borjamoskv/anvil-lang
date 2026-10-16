@@ -1,0 +1,8 @@
+*.html linguist-generated=true
+*.css linguist-generated=true
+*.js linguist-generated=true
+docs/** linguist-documentation=true
+site/** linguist-generated=true
+target/** linguist-generated=true
+*.lean linguist-detectable=true
+*.rs linguist-detectable=true
