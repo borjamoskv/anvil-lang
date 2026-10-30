@@ -11,7 +11,7 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: 'npm run build && npm run preview -- --port 4327',
+    command: 'npm run build && npm run preview -- --port 4327 --ignore-lock',
     url: 'http://localhost:4327',
     reuseExistingServer: true,
     stdout: 'pipe',
