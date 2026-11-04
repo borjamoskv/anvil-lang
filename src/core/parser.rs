@@ -99,7 +99,10 @@ fn parse_param(pair: pest::iterators::Pair<Rule>) -> Result<Param, String> {
 }
 
 fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type, String> {
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| "Expected inner type node in AST".to_string())?;
     match inner.as_rule() {
         Rule::base_type => {
             let s = inner.as_str();
@@ -127,32 +130,66 @@ fn parse_type(pair: pest::iterators::Pair<Rule>) -> Result<Type, String> {
             })
         }
         Rule::array_type => {
-            let inner_ty = parse_type(inner.into_inner().next().unwrap())?;
+            let inner_ty = parse_type(
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| "Expected inner type in wrapper".to_string())?,
+            )?;
             Ok(Type::Array(Box::new(inner_ty)))
         }
         Rule::pointer_type => {
-            let inner_ty = parse_type(inner.into_inner().next().unwrap())?;
+            let inner_ty = parse_type(
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| "Expected inner type in wrapper".to_string())?,
+            )?;
             Ok(Type::Named(format!("*{}", format_type(&inner_ty))))
         }
         Rule::map_type => {
             let mut inners = inner.into_inner();
-            let key_ty = parse_type(inners.next().unwrap())?;
-            let val_ty = parse_type(inners.next().unwrap())?;
+            let key_ty = parse_type(
+                inners
+                    .next()
+                    .ok_or_else(|| "Expected key type in map".to_string())?,
+            )?;
+            let val_ty = parse_type(
+                inners
+                    .next()
+                    .ok_or_else(|| "Expected val type in map".to_string())?,
+            )?;
             Ok(Type::Map(Box::new(key_ty), Box::new(val_ty)))
         }
         Rule::option_type => {
-            let inner_ty = parse_type(inner.into_inner().next().unwrap())?;
+            let inner_ty = parse_type(
+                inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| "Expected inner type in wrapper".to_string())?,
+            )?;
             Ok(Type::Option(Box::new(inner_ty)))
         }
         Rule::result_type => {
             let mut inners = inner.into_inner();
-            let ok_ty = parse_type(inners.next().unwrap())?;
-            let err_ty = parse_type(inners.next().unwrap())?;
+            let ok_ty = parse_type(
+                inners
+                    .next()
+                    .ok_or_else(|| "Expected ok type in result".to_string())?,
+            )?;
+            let err_ty = parse_type(
+                inners
+                    .next()
+                    .ok_or_else(|| "Expected err type in result".to_string())?,
+            )?;
             Ok(Type::Result(Box::new(ok_ty), Box::new(err_ty)))
         }
         Rule::arena_type => {
             let mut inners = inner.into_inner();
-            let size_str = inners.next().unwrap().as_str();
+            let size_str = inners
+                .next()
+                .ok_or_else(|| "Expected arena size node".to_string())?
+                .as_str();
             let size = size_str
                 .parse::<usize>()
                 .map_err(|e| format!("Invalid arena size: {}", e))?;
@@ -309,7 +346,10 @@ fn parse_ghost_var_def(pair: pest::iterators::Pair<Rule>) -> Result<GhostVarDef,
 }
 
 fn parse_invariant(pair: pest::iterators::Pair<Rule>) -> Result<Invariant, String> {
-    let inner = pair.into_inner().next().unwrap();
+    let inner = pair
+        .into_inner()
+        .next()
+        .ok_or_else(|| "Expected inner type node in AST".to_string())?;
     let expr = parse_invariant_expr(inner)?;
     Ok(Invariant { expr, span: None })
 }
@@ -369,10 +409,25 @@ fn parse_invariant_expr(pair: pest::iterators::Pair<Rule>) -> Result<InvariantEx
         }
         Rule::quantifier => {
             let mut inners = pair.into_inner();
-            let q_type = inners.next().unwrap().as_str();
-            let var = inners.next().unwrap().as_str().to_string();
-            let domain = parse_inv_term_from_expr(inners.next().unwrap())?;
-            let body = parse_invariant_expr(inners.next().unwrap())?;
+            let q_type = inners
+                .next()
+                .ok_or_else(|| "Expected quantifier type".to_string())?
+                .as_str();
+            let var = inners
+                .next()
+                .ok_or_else(|| "Expected quantifier variable".to_string())?
+                .as_str()
+                .to_string();
+            let domain = parse_inv_term_from_expr(
+                inners
+                    .next()
+                    .ok_or_else(|| "Expected quantifier domain".to_string())?,
+            )?;
+            let body = parse_invariant_expr(
+                inners
+                    .next()
+                    .ok_or_else(|| "Expected quantifier body".to_string())?,
+            )?;
             match q_type {
                 "forall" => Ok(InvariantExpr::Forall {
                     var,
@@ -388,7 +443,10 @@ fn parse_invariant_expr(pair: pest::iterators::Pair<Rule>) -> Result<InvariantEx
             }
         }
         Rule::invariant_expr => {
-            let inner = pair.into_inner().next().unwrap();
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "Expected inner type node in AST".to_string())?;
             parse_invariant_expr(inner)
         }
         _ => Ok(InvariantExpr::True),
@@ -487,12 +545,19 @@ fn parse_inv_primary(pair: pest::iterators::Pair<Rule>) -> Result<InvTerm, Strin
             }
         }
         Rule::paren_inv => {
-            let inner = pair.into_inner().next().unwrap();
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "Expected inner type node in AST".to_string())?;
             parse_inv_additive(inner)
         }
         Rule::fn_call_inv => {
             let mut inners = pair.into_inner();
-            let name = inners.next().unwrap().as_str().to_string();
+            let name = inners
+                .next()
+                .ok_or_else(|| "Expected function name in invariant call".to_string())?
+                .as_str()
+                .to_string();
             let args: Vec<InvTerm> = inners
                 .filter(|p| p.as_rule() == Rule::additive)
                 .map(parse_inv_additive)
@@ -500,7 +565,10 @@ fn parse_inv_primary(pair: pest::iterators::Pair<Rule>) -> Result<InvTerm, Strin
             Ok(InvTerm::FnCall { name, args })
         }
         Rule::neg_inv => {
-            let inner = pair.into_inner().next().unwrap();
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "Expected inner type node in AST".to_string())?;
             let term = parse_inv_primary(inner)?;
             Ok(InvTerm::BinOp {
                 left: Box::new(InvTerm::Literal(0)),
@@ -563,7 +631,10 @@ fn parse_block(pair: pest::iterators::Pair<Rule>) -> Result<Block, String> {
             Rule::emit_stmt => stmts.push(parse_emit_stmt(inner)?),
             Rule::ghost_stmt => stmts.push(parse_ghost_stmt(inner)?),
             Rule::expr_stmt => {
-                let expr_inner = inner.into_inner().next().unwrap();
+                let expr_inner = inner
+                    .into_inner()
+                    .next()
+                    .ok_or_else(|| "Expected inner expression in statement".to_string())?;
                 stmts.push(Stmt::Expr(parse_expr(expr_inner)?));
             }
             _ => {}
@@ -647,7 +718,11 @@ fn parse_return_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> 
 
 fn parse_assert_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
     let mut inners = pair.into_inner();
-    let condition = parse_expr(inners.next().unwrap())?;
+    let condition = parse_expr(
+        inners
+            .next()
+            .ok_or_else(|| "Expected assertion condition".to_string())?,
+    )?;
     let message = inners
         .next()
         .map(|p| p.as_str().trim_matches('"').to_string());
@@ -657,7 +732,11 @@ fn parse_assert_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> 
 /// Parse emit statement — on-chain event emission
 fn parse_emit_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
     let mut inners = pair.into_inner();
-    let event = inners.next().unwrap().as_str().to_string();
+    let event = inners
+        .next()
+        .ok_or_else(|| "Expected event name in emit statement".to_string())?
+        .as_str()
+        .to_string();
     let mut args = Vec::new();
     for inner in inners {
         match inner.as_rule() {
@@ -783,14 +862,20 @@ fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, String> {
 fn parse_unary(pair: pest::iterators::Pair<Rule>) -> Result<Expr, String> {
     match pair.as_rule() {
         Rule::neg => {
-            let inner = pair.into_inner().next().unwrap();
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "Expected inner type node in AST".to_string())?;
             Ok(Expr::UnaryOp {
                 op: UnaryOp::Neg,
                 operand: Box::new(parse_primary(inner)?),
             })
         }
         Rule::not => {
-            let inner = pair.into_inner().next().unwrap();
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "Expected inner type node in AST".to_string())?;
             Ok(Expr::UnaryOp {
                 op: UnaryOp::Not,
                 operand: Box::new(parse_primary(inner)?),
@@ -821,13 +906,20 @@ fn parse_primary(pair: pest::iterators::Pair<Rule>) -> Result<Expr, String> {
         Rule::string_lit => Ok(Expr::StringLit(pair.as_str().trim_matches('"').to_string())),
         Rule::hex_lit => parse_hex_expr_literal(pair.as_str()),
         Rule::paren_expr => {
-            let inner = pair.into_inner().next().unwrap();
+            let inner = pair
+                .into_inner()
+                .next()
+                .ok_or_else(|| "Expected inner type node in AST".to_string())?;
             parse_expr(inner)
         }
         Rule::alloc_expr => {
             let mut inners = pair.into_inner();
-            let arena_pair = inners.next().unwrap();
-            let value_pair = inners.next().unwrap();
+            let arena_pair = inners
+                .next()
+                .ok_or_else(|| "Expected arena identifier in alloc expression".to_string())?;
+            let value_pair = inners
+                .next()
+                .ok_or_else(|| "Expected value expression in alloc expression".to_string())?;
             let arena = parse_expr(arena_pair)?;
             let value = parse_expr(value_pair)?;
             Ok(Expr::Alloc {
@@ -837,7 +929,11 @@ fn parse_primary(pair: pest::iterators::Pair<Rule>) -> Result<Expr, String> {
         }
         Rule::fn_call => {
             let mut inners = pair.into_inner();
-            let name = inners.next().unwrap().as_str().to_string();
+            let name = inners
+                .next()
+                .ok_or_else(|| "Expected function name in function call".to_string())?
+                .as_str()
+                .to_string();
             let mut args = Vec::new();
             for inner in inners {
                 match inner.as_rule() {

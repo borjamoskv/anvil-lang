@@ -195,7 +195,7 @@ def run_all_proofs():
             elif not result.get("converged"):
                 convergence_failures.append((x, y, amp, desc, result))
             print(f"  {status} D={D_val} (iters={iters}) — {desc}")
-        except Exception as e:
+        except (z3.Z3Exception, ValueError, TypeError) as e:
             print(f"  💥 CRASH: {e} — {desc}")
             convergence_failures.append((x, y, amp, desc, {"error": str(e)}))
 

@@ -133,7 +133,7 @@ def main():
         total_records, metrics, recent_entries = get_ledger_summary(conn)
         total_keys, key_tiers = get_keys_summary(conn)
         conn.close()
-    except Exception as e:
+    except sqlite3.Error as e:
         print(f"[✗] Database read error: {e}", file=sys.stderr)
         sys.exit(1)
         
@@ -150,7 +150,7 @@ def main():
     try:
         send_via_applescript(args.to, args.subject, report_text)
         print("[✓] Report successfully dispatched via Apple Mail.")
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError) as e:
         print(f"[✗] Failed to send email via AppleScript: {e}", file=sys.stderr)
         print("[!] Ensure Mail.app is configured and has automation permissions in System Settings.")
 

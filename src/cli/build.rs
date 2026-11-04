@@ -457,7 +457,8 @@ fn emit_cortex_manifest(
 
     match std::fs::write(
         &manifest_path,
-        serde_json::to_string_pretty(&manifest).unwrap(),
+        serde_json::to_string_pretty(&manifest)
+            .expect("Failed to serialize build manifest to JSON"),
     ) {
         Ok(_) => {
             info!(path = %manifest_path.display(), proofs = results.len(), "CORTEX manifest emitted");

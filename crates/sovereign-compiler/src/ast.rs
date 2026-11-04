@@ -59,6 +59,12 @@ pub enum Stmt {
     Block(Vec<Stmt>),
     /// Bloque de anergía controlada (Ring-0 operations)
     UnsafeBlock(Vec<Stmt>),
+    /// Bifurcación condicional gobernada por paridad de recursos QTT (Regla Q1)
+    If {
+        cond: Expr,
+        then_branch: Box<Stmt>,
+        else_branch: Option<Box<Stmt>>,
+    },
     /// Nodo SINTÉTICO: Inyectado por el compilador para el Drop determinista.
     /// No escribible por el programador.
     SyntheticDrop(String),

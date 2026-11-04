@@ -43,7 +43,7 @@ def run_test():
             print("Respuesta:", response.json())
         else:
             print("[-] Error en la inyección:", response.status_code, response.text)
-    except Exception:
+    except (requests.RequestException, OSError, ValueError):
         print("[-] Error de conexión. ¿Está levantado el servidor FastAPI en el puerto 8000?")
         print("    Ejecuta: uvicorn api.main:app --reload")
         

@@ -327,7 +327,9 @@ pub fn cmd_check(file: &Path, json_output: bool, timeout_ms: u64) {
 }
 
 fn print_json_report(report: &CheckJsonReport) {
-    println!("{}", serde_json::to_string(report).unwrap());
+    let json_out =
+        serde_json::to_string(report).expect("Failed to serialize verification report to JSON");
+    println!("{}", json_out);
 }
 
 fn error_report(

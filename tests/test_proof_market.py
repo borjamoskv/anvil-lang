@@ -42,7 +42,7 @@ def wait_for_oracle(process, health_url):
         try:
             with urllib.request.urlopen(health_url, timeout=0.25):
                 return
-        except Exception:
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError):
             time.sleep(0.1)
     raise TimeoutError("Proof Market process did not become healthy")
 

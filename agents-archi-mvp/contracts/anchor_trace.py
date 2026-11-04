@@ -49,7 +49,7 @@ def anchor_traces():
                 anchorer = None
             else:
                 print("[C5-REAL] Secure RPC node connected. Commencing blockchain write operations.")
-        except Exception as e:
+        except (requests.RequestException, OSError, ValueError) as e:
             print(f"[*] Connection failed: {e}. Operating in C4-SIMULACIÓN mode.")
             anchorer = None
     else:

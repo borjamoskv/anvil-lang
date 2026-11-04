@@ -56,6 +56,16 @@ jobs:
       with:
         python-version: '3.10'
 
+    - name: Install Elan & Lean 4 toolchain
+      run: |
+        curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+        echo "$HOME/.elan/bin" >> $GITHUB_PATH
+        source "$HOME/.elan/env"
+        elan toolchain install $(cat lean-toolchain)
+        elan default $(cat lean-toolchain)
+        lean --version
+        lake --version
+
     - name: Run Quick Checks
       run: scripts/ci-quick.sh
 
@@ -98,6 +108,16 @@ jobs:
       with:
         python-version: '3.10'
 
+    - name: Install Elan & Lean 4 toolchain
+      run: |
+        curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+        echo "$HOME/.elan/bin" >> $GITHUB_PATH
+        source "$HOME/.elan/env"
+        elan toolchain install $(cat lean-toolchain)
+        elan default $(cat lean-toolchain)
+        lean --version
+        lake --version
+
     - name: Run Full Checks
       run: scripts/ci-full.sh
 
@@ -110,16 +130,23 @@ jobs:
 
     - name: Generate CORTEX Provenance Manifests
       run: |
+        set -euo pipefail
+        shopt -s nullglob
         echo "  → Generating CORTEX provenance manifests for example programs..."
         mkdir -p artifacts/cortex
         for anv_file in examples/*.anv; do
           if [ -f "$anv_file" ]; then
             echo "  → Building $anv_file with provenance..."
-            "$CARGO_TARGET_DIR/debug/anvil" build "$anv_file" -o "artifacts/cortex/$(basename "$anv_file" .anv)" || true
+            "$CARGO_TARGET_DIR/debug/anvil" build "$anv_file" -o "artifacts/cortex/$(basename "$anv_file" .anv)"
           fi
         done
         echo "  ✓ Manifests generated:"
-        ls -la artifacts/cortex/*.cortex_manifest.json 2>/dev/null || echo "  (no manifests generated)"
+        manifests=(artifacts/cortex/*.cortex_manifest.json)
+        if (( ${#manifests[@]} == 0 )); then
+          echo "No CORTEX provenance manifests generated" >&2
+          exit 1
+        fi
+        ls -la "${manifests[@]}"
 
     - name: Upload CORTEX Provenance Artifacts
       uses: actions/upload-artifact@v7
@@ -127,7 +154,7 @@ jobs:
       with:
         name: cortex-provenance-manifests
         path: artifacts/cortex/*.cortex_manifest.json
-        if-no-files-found: ignore
+        if-no-files-found: error
         retention-days: 90
 
   security:
@@ -156,3 +183,58 @@ jobs:
       run: |
         cargo audit --file Cargo.lock
         cargo audit --file services/proof-market/Cargo.lock
+
+  lean-soundness:
+    name: Lean 4 Kernel Soundness & Axiomatic Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.10'
+
+    - name: Install elan & Lean 4
+      run: |
+        curl -sSf https://raw.githubusercontent.com/leanprover/elan/master/elan-init.sh | sh -s -- -y --default-toolchain none
+        echo "$HOME/.elan/bin" >> $GITHUB_PATH
+
+    - name: Verify Lean Toolchain (>= 4.32.2)
+      run: |
+        export PATH="$HOME/.elan/bin:$PATH"
+        lean --version
+        python3 -c "
+        import re, sys
+        content = open('lean-toolchain').read().strip()
+        m = re.search(r'v4\.(\d+)\.(\d+)', content)
+        assert m, f'Invalid toolchain format: {content}'
+        minor, patch = int(m.group(1)), int(m.group(2))
+        assert (minor > 32) or (minor == 32 and patch >= 2), f'Toolchain v4.{minor}.{patch} must be >= v4.32.2'
+        print(f'✓ lean-toolchain v4.{minor}.{patch} satisfies CVE-2026-72711 & #14576 mitigation gate.')
+        "
+
+    - name: Lake Build Formal Kernel
+      run: |
+        export PATH="$HOME/.elan/bin:$PATH"
+        lake build
+
+    - name: Audit Axioms Gate (#print axioms)
+      run: |
+        export PATH="$HOME/.elan/bin:$PATH"
+        echo "Auditing axiomatic footprint..."
+        output=$(lake build Anvil.AuditAxioms 2>&1)
+        echo "$output"
+        if echo "$output" | grep -E "False|sorryAx"; then
+          echo "FATAL: Unsound axiom or unverified hole detected in kernel!" >&2
+          exit 1
+        fi
+        echo "✓ Zero unsound axioms detected."
+
+    - name: Run Lean & Moloch-Landauer Test Suites
+      run: |
+        export PATH="$HOME/.elan/bin:$PATH"
+        python3 -m unittest tests/test_lean_kernel_soundness.py tests/test_moloch_landauer_gate.py

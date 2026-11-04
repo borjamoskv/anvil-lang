@@ -787,7 +787,7 @@ class ProofMarketHandler(http.server.SimpleHTTPRequestHandler):
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
             
-            except Exception as e:
+            except (OSError, RuntimeError, ValueError) as e:
                 write_json(self, 500, prove_response("EXECUTION_ERROR", str(e)))
         else:
             self.send_response(404)

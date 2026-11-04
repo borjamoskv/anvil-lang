@@ -146,3 +146,59 @@ fn test_raw_ptr_outside_unsafe_rejected() {
     let res = check_statement(&ast, &mut ctx);
     assert!(res.is_err(), "Vincular raw ptr fuera de unsafe debe fallar");
 }
+
+#[test]
+fn test_q1_linear_branch_mismatch_rejected() {
+    use sovereign_c::ast::{Expr, Stmt, Type};
+
+    // Declaramos recurso afín `token`
+    // En `then` se mueve `token`, pero en `else` no se consume (consumo asimétrico).
+    let ast = Stmt::Block(vec![
+        Stmt::Let("token".to_string(), Type::Owned(Box::new(Type::U8)), Expr::LiteralInt(64)),
+        Stmt::If {
+            cond: Expr::LiteralBool(true),
+            then_branch: Box::new(Stmt::Block(vec![
+                Stmt::Let("sink".to_string(), Type::Owned(Box::new(Type::U8)), Expr::Move("token".to_string())),
+            ])),
+            else_branch: Some(Box::new(Stmt::Block(vec![]))),
+        },
+    ]);
+
+    let mut ctx = BorrowContext::new();
+    let res = check_statement(&ast, &mut ctx);
+    assert!(
+        res.is_err(),
+        "Regla Q1: El consumo asimétrico de variable afín en ramas condicionales debe fallar cerrado"
+    );
+    let err = res.err().unwrap();
+    assert!(
+        err.contains("LinearVariableMismatch"),
+        "El error debe identificar LinearVariableMismatch: {}",
+        err
+    );
+}
+
+#[test]
+fn test_q1_symmetric_linear_branch_accepted_and_lowered() {
+    use sovereign_c::ast::{Expr, Stmt, Type};
+
+    // Ambas ramas consumen `token` simétricamente (u_t = u_e = 1)
+    let ast = Stmt::Block(vec![
+        Stmt::Let("token".to_string(), Type::Owned(Box::new(Type::U8)), Expr::LiteralInt(64)),
+        Stmt::If {
+            cond: Expr::LiteralBool(true),
+            then_branch: Box::new(Stmt::Block(vec![
+                Stmt::Let("sink1".to_string(), Type::Owned(Box::new(Type::U8)), Expr::Move("token".to_string())),
+            ])),
+            else_branch: Some(Box::new(Stmt::Block(vec![
+                Stmt::Let("sink2".to_string(), Type::Owned(Box::new(Type::U8)), Expr::Move("token".to_string())),
+            ]))),
+        },
+    ]);
+
+    let mut ctx = BorrowContext::new();
+    let transformed = check_statement(&ast, &mut ctx).expect("El consumo simétrico debe compilar");
+    let visitor = IrLoweringVisitor::new();
+    let ir = visitor.lower_ast(&transformed, "q1_symmetric");
+    assert!(!ir.blocks.is_empty(), "IR debe generar bloques básicos para bifurcación y unión");
+}

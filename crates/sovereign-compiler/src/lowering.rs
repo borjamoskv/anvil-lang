@@ -212,6 +212,41 @@ impl IrLoweringVisitor {
 
                 self.finish_block(Terminator::Jump(post_label.clone()), post_label);
             }
+            Stmt::If { cond, then_branch, else_branch } => {
+                let cond_op = self.lower_expr(cond);
+                let cond_reg = match cond_op {
+                    Operand::Reg(r) => r,
+                    Operand::Imm(v) => {
+                        let r = self.alloc_reg();
+                        self.current_instructions.push(IrOp::AssignImm { dest: r, value: v });
+                        r
+                    }
+                };
+                let then_label = self.new_label("bb_if_then");
+                let join_label = self.new_label("bb_if_join");
+                let else_label = if else_branch.is_some() {
+                    self.new_label("bb_if_else")
+                } else {
+                    join_label.clone()
+                };
+
+                self.finish_block(
+                    Terminator::BranchIf {
+                        cond: cond_reg,
+                        then_bb: then_label.clone(),
+                        else_bb: else_label.clone(),
+                    },
+                    then_label,
+                );
+
+                self.lower_stmt(then_branch);
+                self.finish_block(Terminator::Jump(join_label.clone()), else_label);
+
+                if let Some(else_b) = else_branch {
+                    self.lower_stmt(else_b);
+                    self.finish_block(Terminator::Jump(join_label.clone()), join_label);
+                }
+            }
             Stmt::SyntheticDrop(name) => {
                 // IMPERATIVO 2: Materialización del SyntheticDrop en Free (@__sovereign_dealloc)
                 if let Some((ptr_reg, ty)) = self.lookup_symbol(name) {

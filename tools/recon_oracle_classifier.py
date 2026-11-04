@@ -405,7 +405,7 @@ def scan_directory(path: str) -> list:
                 fp = classify_source(source)
                 fp.address = sol_file
                 results.append(fp)
-            except Exception as e:
+            except (requests.RequestException, json.JSONDecodeError, OSError) as e:
                 print(f"  [!] Error scanning {sol_file}: {e}")
 
     return results

@@ -1,12 +1,7 @@
 async function loadRegistryData() {
-    try {
-        const response = await fetch('http://127.0.0.1:8000/api/v1/registry');
-        const data = await response.json();
-        return data;
-    } catch (error) {
-        console.error("Failed to load registry data:", error);
-        return null;
-    }
+    const response = await fetch('http://127.0.0.1:8000/api/v1/registry');
+    if (!response.ok) return null;
+    return await response.json();
 }
 
 let feedEvents = [];

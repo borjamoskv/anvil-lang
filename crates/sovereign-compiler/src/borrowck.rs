@@ -125,6 +125,13 @@ fn collect_used_vars_stmt(stmt: &Stmt, vars: &mut HashSet<String>) {
                 collect_used_vars_stmt(s, vars);
             }
         }
+        Stmt::If { cond, then_branch, else_branch } => {
+            collect_used_vars_expr(cond, vars);
+            collect_used_vars_stmt(then_branch, vars);
+            if let Some(else_b) = else_branch {
+                collect_used_vars_stmt(else_b, vars);
+            }
+        }
         _ => {}
     }
 }
@@ -226,6 +233,73 @@ pub fn check_statement(stmt: &Stmt, ctx: &mut BorrowContext) -> Result<Vec<Stmt>
             transformed_stmts.extend(fallback_drops);
             
             Ok(vec![Stmt::UnsafeBlock(transformed_stmts)])
+        }
+        Stmt::If { cond, then_branch, else_branch } => {
+            check_expression(cond, ctx)?;
+
+            let before_scopes = ctx.scopes.clone();
+
+            let mut then_ctx = BorrowContext {
+                scopes: before_scopes.clone(),
+                is_unsafe: ctx.is_unsafe,
+            };
+            let transformed_then = check_statement(then_branch, &mut then_ctx)?;
+
+            let (transformed_else, else_scopes) = if let Some(else_b) = else_branch {
+                let mut else_ctx = BorrowContext {
+                    scopes: before_scopes.clone(),
+                    is_unsafe: ctx.is_unsafe,
+                };
+                let stmts = check_statement(else_b, &mut else_ctx)?;
+                let single_stmt = if stmts.len() == 1 {
+                    stmts.into_iter().next().unwrap()
+                } else {
+                    Stmt::Block(stmts)
+                };
+                (Some(Box::new(single_stmt)), else_ctx.scopes)
+            } else {
+                (None, before_scopes.clone())
+            };
+
+            // Regla Q1 (INV_C5_QTT_SOUNDNESS):
+            // Verificación estricta de paridad de consumo en bifurcaciones condicionales.
+            // Si una variable afín se consume en una rama pero no en la otra, falla cerrado.
+            for i in 0..before_scopes.len() {
+                for (name, initial_state) in &before_scopes[i] {
+                    let state_then = then_ctx.scopes[i].get(name).unwrap_or(initial_state);
+                    let state_else = else_scopes[i].get(name).unwrap_or(initial_state);
+
+                    if state_then != state_else {
+                        if let ResourceState::Active(ty) = initial_state {
+                            if ty.is_affine() {
+                                return Err(format!(
+                                    "LinearVariableMismatch: Consumo asimétrico de recurso afín '{}' en ramas condicionales (Violación Regla Q1 / INV_C5_QTT_SOUNDNESS)",
+                                    name
+                                ));
+                            }
+                        }
+                    }
+
+                    // Sincronizar estado resultante si ambas ramas tuvieron consumo simétrico
+                    if let Some(state) = ctx.scopes[i].get_mut(name) {
+                        if state_then == state_else {
+                            *state = state_then.clone();
+                        }
+                    }
+                }
+            }
+
+            let single_then = if transformed_then.len() == 1 {
+                transformed_then.into_iter().next().unwrap()
+            } else {
+                Stmt::Block(transformed_then)
+            };
+
+            Ok(vec![Stmt::If {
+                cond: cond.clone(),
+                then_branch: Box::new(single_then),
+                else_branch: transformed_else,
+            }])
         }
         _ => Ok(vec![stmt.clone()]),
     }

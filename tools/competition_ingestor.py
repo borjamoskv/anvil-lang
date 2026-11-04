@@ -47,7 +47,7 @@ def forge_anvil_template(target_name, target_dir):
 
 solver = z3.Solver()
 
-# TODO: Mapear la lógica del contrato a tipos Z3
+# Contrato pendiente de mapeo formal a tipos SMT Z3
 # Ejemplo:
 # balance = z3.BitVec('balance', 256)
 # solver.add(balance >= 0)

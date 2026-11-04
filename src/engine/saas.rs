@@ -97,8 +97,12 @@ pub async fn start_server(port: u16) {
     eprintln!("  🚀 Anvil Proof Market SaaS running on http://{}", addr);
     eprintln!("  📊 Prometheus metrics at http://{}/metrics", addr);
 
-    let listener = TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = TcpListener::bind(addr)
+        .await
+        .expect("Failed to bind TCP listener for Proof Market SaaS service");
+    axum::serve(listener, app)
+        .await
+        .expect("Axum server crashed unexpectedly");
 }
 
 async fn health_check() -> impl IntoResponse {

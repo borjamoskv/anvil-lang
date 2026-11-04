@@ -20,7 +20,7 @@ if not CONTRACT_ADDRESS:
                 cfg = json.load(f)
                 CONTRACT_ADDRESS = cfg.get("contract_address", DEFAULT_ADDRESS)
                 print(f"[Ω] Loaded deployed contract address: {CONTRACT_ADDRESS}")
-        except Exception:
+        except (requests.RequestException, OSError, ValueError):
             CONTRACT_ADDRESS = DEFAULT_ADDRESS
     else:
         CONTRACT_ADDRESS = DEFAULT_ADDRESS

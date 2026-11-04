@@ -458,7 +458,9 @@ fn verify_function(
                 let mut ce = String::from(
                     "GLOBAL INVARIANT VIOLATED: Share Inflation detected! (Assets decreased but Supply did not)\n",
                 );
-                let model = solver.get_model().unwrap();
+                let model = solver
+                    .get_model()
+                    .expect("Z3 solver check returned Sat; model must be available");
                 append_model_values(&mut ce, &model, &pre_vars, "");
                 append_model_values(&mut ce, &model, &post_vars, "'");
                 if counterexample.is_none() {
@@ -490,7 +492,9 @@ fn verify_function(
                 let mut ce = String::from(
                     "GLOBAL INVARIANT VIOLATED: Conservation ratio compromised! (Protocol became undercollateralized)\n",
                 );
-                let model = solver.get_model().unwrap();
+                let model = solver
+                    .get_model()
+                    .expect("Z3 solver check returned Sat; model must be available");
                 append_model_values(&mut ce, &model, &pre_vars, "");
                 append_model_values(&mut ce, &model, &post_vars, "'");
                 if counterexample.is_none() {
@@ -530,7 +534,9 @@ fn verify_function(
                 let mut ce = String::from(
                     "GLOBAL INVARIANT VIOLATED: Flashloan Atomicity broken! (Debt remains unpaid)\n",
                 );
-                let model = solver.get_model().unwrap();
+                let model = solver
+                    .get_model()
+                    .expect("Z3 solver check returned Sat; model must be available");
                 append_model_values(&mut ce, &model, &pre_vars, "");
                 append_model_values(&mut ce, &model, &post_vars, "'");
                 if counterexample.is_none() {
@@ -563,7 +569,9 @@ fn verify_function(
                 match solver.check() {
                     SatResult::Sat => {
                         all_verified = false;
-                        let model = solver.get_model().unwrap();
+                        let model = solver
+                            .get_model()
+                            .expect("Z3 solver check returned Sat; model must be available");
                         let mut ce = format!("Postcondition #{} violated:\n", i + 1);
                         append_model_values(&mut ce, &model, &pre_vars, "");
                         append_model_values(&mut ce, &model, &post_vars, "'");
@@ -609,7 +617,9 @@ fn verify_function(
                 match solver.check() {
                     SatResult::Sat => {
                         all_verified = false;
-                        let model = solver.get_model().unwrap();
+                        let model = solver
+                            .get_model()
+                            .expect("Z3 solver check returned Sat; model must be available");
                         let mut ce = format!("Contract invariant #{} violated:\n", i + 1);
                         append_model_values(&mut ce, &model, &pre_vars, "");
                         append_model_values(&mut ce, &model, &post_vars, "'");
@@ -1389,14 +1399,18 @@ fn encode_block<'ctx>(
                     encoding.current_vars = saved_current.clone(); // Start merge from baseline
 
                     for var_name in all_modified {
-                        let val_then = then_current
-                            .get(&var_name)
-                            .cloned()
-                            .unwrap_or_else(|| saved_current.get(&var_name).cloned().unwrap());
-                        let val_else = else_current
-                            .get(&var_name)
-                            .cloned()
-                            .unwrap_or_else(|| saved_current.get(&var_name).cloned().unwrap());
+                        let val_then = then_current.get(&var_name).cloned().unwrap_or_else(|| {
+                            saved_current
+                                .get(&var_name)
+                                .cloned()
+                                .expect("SSA merge: variable must exist in baseline environment")
+                        });
+                        let val_else = else_current.get(&var_name).cloned().unwrap_or_else(|| {
+                            saved_current
+                                .get(&var_name)
+                                .cloned()
+                                .expect("SSA merge: variable must exist in baseline environment")
+                        });
 
                         let merge_var = encoding.fresh_bv(ctx, &format!("{}_ssa_if", var_name));
 
@@ -1716,13 +1730,15 @@ fn inject_constraint_for_var<'ctx>(
         }
         ConstraintKind::UpperBound { bits } => {
             if *bits < SOLVER_BV_WIDTH {
-                let upper = bv_pow2(ctx, *bits).unwrap();
+                let upper = bv_pow2(ctx, *bits)
+                    .expect("UpperBound: bitwidth must be valid bitvector exponent");
                 solver.assert(&var.bvult(&upper));
             }
         }
         ConstraintKind::SignedBound { bits } => {
             if *bits < SOLVER_BV_WIDTH {
-                let upper = bv_pow2(ctx, *bits - 1).unwrap();
+                let upper = bv_pow2(ctx, *bits - 1)
+                    .expect("SignedBound: bitwidth must be valid bitvector exponent");
                 let lower = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH).bvsub(&upper);
                 solver.assert(&var.bvsge(&lower));
                 solver.assert(&var.bvslt(&upper));
@@ -3137,9 +3153,11 @@ fn process_alloc_side_effects<'ctx>(
 
             let value_ty = infer_expr_type_for_verifier(value, &encoding.var_types);
             let size = match value_ty {
-                Some(Type::Named(name)) if encoding.struct_sizes.contains_key(&name) => {
-                    *encoding.struct_sizes.get(&name).unwrap() as i64
-                }
+                Some(Type::Named(name)) if encoding.struct_sizes.contains_key(&name) => *encoding
+                    .struct_sizes
+                    .get(&name)
+                    .expect("Struct size must be present after verification registration")
+                    as i64,
                 Some(ty) => verifier_type_size(&ty) as i64,
                 None => return,
             };

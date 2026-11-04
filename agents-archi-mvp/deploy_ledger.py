@@ -42,7 +42,7 @@ def deploy(rpc_url: str, private_key: str):
     try:
         deployer = Account.from_key(private_key)
         print(f"[+] Deployer Address: {deployer.address}")
-    except Exception as e:
+    except (requests.RequestException, OSError, ValueError) as e:
         print(f"[!] Invalid Private Key format: {e}")
         sys.exit(1)
 

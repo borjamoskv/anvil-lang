@@ -91,7 +91,7 @@ class ArchiTrace:
         try:
             resp = requests.post(gateway_url, json=payload, timeout=5)
             return resp.json()
-        except Exception as e:
+        except (requests.RequestException, OSError, ValueError) as e:
             return {"status": "error", "message": str(e)}
 
 # --- SIMULATION ---

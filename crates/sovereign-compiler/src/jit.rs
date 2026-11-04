@@ -37,7 +37,8 @@ impl SovereignJitEngine {
         let ptr = exec_map.as_ptr();
 
         // Transmutamos el puntero físico puro a una firma C-FFI
-        let jitted_function: extern "C" fn() -> u64 = mem::transmute(ptr);
+        #[allow(clippy::missing_transmute_annotations)]
+        let jitted_function: extern "C" fn() -> u64 = unsafe { mem::transmute(ptr) };
 
         // Ejecutamos la función directamente en el hilo nativo
         let result = jitted_function();

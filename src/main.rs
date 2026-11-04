@@ -110,12 +110,12 @@ fn main() {
         tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
-            .unwrap()
+            .expect("Failed to initialize multi-threaded tokio runtime")
     } else {
         tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
-            .unwrap()
+            .expect("Failed to initialize current-thread tokio runtime")
     };
 
     rt.block_on(async {

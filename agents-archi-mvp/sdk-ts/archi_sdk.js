@@ -71,10 +71,8 @@ export class ArchiTrace {
                 return null;
             }
         }
-        catch (error) {
             console.error(`[Archi-SDK] [ERROR] Failed to anchor trace: ${error.message}`);
             return null;
-        }
     }
 }
 //# sourceMappingURL=archi_sdk.js.map

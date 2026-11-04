@@ -84,7 +84,7 @@ def check_for_reply():
         mail.logout()
         return new_emails
         
-    except Exception as e:
+    except (imaplib.IMAP4.error, OSError) as e:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {e}")
         return []
 

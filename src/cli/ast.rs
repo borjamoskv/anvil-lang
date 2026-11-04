@@ -28,5 +28,6 @@ pub fn cmd_ast(file: &Path) {
         }
     };
 
-    println!("{}", serde_json::to_string_pretty(&program).unwrap());
+    let json_out = serde_json::to_string_pretty(&program).expect("Failed to serialize AST to JSON");
+    println!("{}", json_out);
 }

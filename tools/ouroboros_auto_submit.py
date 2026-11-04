@@ -338,7 +338,7 @@ def clipboard_inject(text: str) -> bool:
                 capture_output=True,
             )
             return True
-        except Exception:
+        except (requests.RequestException, OSError):
             return False
 
 
@@ -550,7 +550,7 @@ def cmd_prepare(target_id: str, inject: bool = False, submit: bool = False, dry_
                 if not dry_run:
                     print("  ✅ CORTEX Ledger: DRAFT created via API.")
                     print("  ⚠️  MANUAL STEP REQUIRED: Open draft in browser → complete wallet + review → Submit.")
-            except Exception as e:
+            except (requests.RequestException, OSError, ValueError) as e:
                 print(f"  ❌ Submission aborted: {e}")
                 
         elif inject:

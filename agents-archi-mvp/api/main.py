@@ -31,7 +31,7 @@ try:
         logging.warning(
             "[C4-SIM] RealAnchorer init but no RPC"
         )
-except Exception as exc:
+except (requests.RequestException, OSError, ValueError) as exc:
     logging.warning(f"[C4-SIM] Anchorer unavailable: {exc}")
 
 app = FastAPI(
@@ -75,7 +75,7 @@ def load_registry():
             data.setdefault("feed", [])
             data.setdefault("leaderboard", [])
             return data
-    except Exception:
+    except (requests.RequestException, OSError, ValueError):
         return {
             "traces": [],
             "leaderboard": [],
@@ -100,7 +100,7 @@ def try_anchor_onchain(
             trace_hash, agent_id, domain
         )
         return tx_hash
-    except Exception as exc:
+    except (requests.RequestException, OSError, ValueError) as exc:
         logging.error(f"[!] On-chain anchor failed: {exc}")
         return None
 
