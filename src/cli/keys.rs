@@ -88,8 +88,17 @@ pub async fn cmd_keys(action: KeyAction) {
                 .execute(&pool)
                 .await
             {
-                Ok(_) => println!("  {} Revoked key: {}", "✓".bright_green(), key),
-                Err(e) => eprintln!("  {} Failed to revoke key: {}", "✗".bright_red(), e),
+                Ok(result) if result.rows_affected() == 1 => {
+                    println!("  {} Revoked key: {}", "✓".bright_green(), key);
+                }
+                Ok(_) => {
+                    eprintln!("Key not found or non-unique: {}", key);
+                    std::process::exit(1);
+                }
+                Err(e) => {
+                    eprintln!("  {} Failed to revoke key: {}", "✗".bright_red(), e);
+                    std::process::exit(1);
+                }
             }
         }
     }

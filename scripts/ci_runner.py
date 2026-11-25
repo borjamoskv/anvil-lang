@@ -17,18 +17,19 @@ from typing import Dict, List, Optional, Sequence
 
 ROOT = Path(__file__).resolve().parent.parent
 MARKET = "services/proof-market/Cargo.toml"
+SOVEREIGN = "crates/sovereign-compiler/Cargo.toml"
 GROUPS = ("build", "parse", "regression", "soundness", "verify", "other")
 INTEGRATION = ["integration-prepare"] + [f"integration-{group}" for group in GROUPS]
 QUICK = [
     "runner-tests", "fmt-anvil", "fmt-market", "check-anvil", "check-market",
-    "unit-anvil", "unit-market", "lean-kernel",
+    "unit-anvil", "unit-market", "unit-sovereign", "lean-kernel",
 ]
 SUITES = {
     "quick": QUICK,
     "smoke": ["check-anvil", "unit-anvil", "build-anvil"] + INTEGRATION
     + ["doctor", "transfer", "saas"],
     "full": ["runner-tests", "fmt-anvil", "fmt-market", "build-anvil", "build-market",
-             "unit-anvil", "unit-market", "lean-kernel"] + INTEGRATION
+             "unit-anvil", "unit-market", "unit-sovereign", "lean-kernel"] + INTEGRATION
     + ["market-http", "market-amm", "hello", "transfer", "doctor", "saas",
        "release-anvil", "release-market"],
 }
@@ -212,6 +213,7 @@ class Runner:
             "build-market": cargo + ["build", "--manifest-path", MARKET, "--bin", "proof-market"],
             "unit-anvil": cargo + ["test", "--bin", "anvil", "--", "--test-threads=1"],
             "unit-market": cargo + ["test", "--manifest-path", MARKET, "--", "--test-threads=1"],
+            "unit-sovereign": cargo + ["test", "--locked", "--manifest-path", SOVEREIGN, "--", "--test-threads=1"],
             "lean-kernel": [sys.executable, "-m", "unittest", "tests.test_lean_kernel_soundness", "tests.test_moloch_landauer_gate"],
             "release-anvil": cargo + ["build", "--release", "--bin", "anvil"],
             "release-market": cargo + ["build", "--release", "--manifest-path", MARKET, "--bin", "proof-market"],

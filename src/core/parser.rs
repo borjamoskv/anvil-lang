@@ -397,6 +397,9 @@ fn parse_invariant_expr(pair: pest::iterators::Pair<Rule>) -> Result<InvariantEx
                     right: Box::new(InvTerm::Literal(0)),
                 });
             }
+            if inners.len() != 3 {
+                return Err("Chained invariant comparisons require explicit conjunctions".to_string());
+            }
             // left op right
             let left = parse_inv_additive(inners.remove(0))?;
             let op = parse_cmp_op(inners.remove(0))?;
@@ -620,6 +623,7 @@ fn parse_cmp_op(pair: pest::iterators::Pair<Rule>) -> Result<CmpOp, String> {
 
 fn parse_block(pair: pest::iterators::Pair<Rule>) -> Result<Block, String> {
     let mut stmts = Vec::new();
+    let mut expr = None;
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::let_stmt => stmts.push(parse_let_stmt(inner)?),
@@ -637,10 +641,11 @@ fn parse_block(pair: pest::iterators::Pair<Rule>) -> Result<Block, String> {
                     .ok_or_else(|| "Expected inner expression in statement".to_string())?;
                 stmts.push(Stmt::Expr(parse_expr(expr_inner)?));
             }
-            _ => {}
+            Rule::expr => expr = Some(Box::new(parse_expr(inner)?)),
+            other => return Err(format!("Unsupported block element: {:?}", other)),
         }
     }
-    Ok(Block { stmts, expr: None })
+    Ok(Block { stmts, expr })
 }
 
 fn parse_let_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
@@ -699,16 +704,28 @@ fn parse_assign_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> 
 }
 
 fn parse_lvalue(pair: pest::iterators::Pair<Rule>) -> Result<LValue, String> {
-    let s = pair.as_str().trim();
-    if s.contains('.') {
-        let parts: Vec<&str> = s.split('.').collect();
-        Ok(LValue::FieldAccess {
-            object: parts[0].trim().to_string(),
-            field: parts[1].trim().to_string(),
-        })
-    } else {
-        Ok(LValue::Ident(s.to_string()))
+    let mut parts = pair.into_inner();
+    let object = parts
+        .next()
+        .ok_or_else(|| "Missing assignment target".to_string())?
+        .as_str()
+        .to_string();
+    let target = match parts.next() {
+        None => LValue::Ident(object),
+        Some(part) if part.as_rule() == Rule::ident => LValue::FieldAccess {
+            object,
+            field: part.as_str().to_string(),
+        },
+        Some(part) if part.as_rule() == Rule::expr => LValue::Index {
+            object,
+            index: Box::new(parse_expr(part)?),
+        },
+        Some(_) => return Err("Unsupported assignment target".to_string()),
+    };
+    if parts.next().is_some() {
+        return Err("Nested assignment targets are not supported".to_string());
     }
+    Ok(target)
 }
 
 fn parse_return_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
@@ -809,13 +826,15 @@ fn parse_if_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
         expr: None,
     };
     let mut else_block = None;
+    let mut seen_then = false;
 
     for inner in pair.into_inner() {
         match inner.as_rule() {
             Rule::expr => condition = parse_expr(inner)?,
             Rule::block => {
-                if then_block.stmts.is_empty() {
+                if !seen_then {
                     then_block = parse_block(inner)?;
+                    seen_then = true;
                 } else {
                     else_block = Some(parse_block(inner)?);
                 }
@@ -838,25 +857,53 @@ fn parse_if_stmt(pair: pest::iterators::Pair<Rule>) -> Result<Stmt, String> {
     })
 }
 
+// Rust-style precedence, highest binding power last; all binary operators
+// are left associative. Parenthesized expressions are parsed recursively.
+fn binary_precedence(op: &BinOp) -> u8 {
+    match op {
+        BinOp::Or => 1,
+        BinOp::And => 2,
+        BinOp::Eq | BinOp::Neq | BinOp::Lt | BinOp::Gt | BinOp::Lte | BinOp::Gte => 3,
+        BinOp::BitOr => 4,
+        BinOp::BitXor => 5,
+        BinOp::BitAnd => 6,
+        BinOp::Shl | BinOp::Shr => 7,
+        BinOp::Add | BinOp::Sub => 8,
+        BinOp::Mul | BinOp::Div | BinOp::Mod => 9,
+    }
+}
+
+fn reduce_binary(values: &mut Vec<Expr>, operators: &mut Vec<BinOp>) -> Result<(), String> {
+    let op = operators.pop().ok_or_else(|| "Missing binary operator".to_string())?;
+    let right = values.pop().ok_or_else(|| "Missing right operand".to_string())?;
+    let left = values.pop().ok_or_else(|| "Missing left operand".to_string())?;
+    values.push(Expr::BinOp { left: Box::new(left), op, right: Box::new(right) });
+    Ok(())
+}
+
 fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, String> {
     let mut inners = pair.into_inner();
-    let first = inners
-        .next()
-        .ok_or_else(|| "Expected expression".to_string())?;
-    let mut left = parse_unary(first)?;
+    let first = inners.next().ok_or_else(|| "Expected expression".to_string())?;
+    let mut values = vec![parse_unary(first)?];
+    let mut operators = Vec::new();
     while let Some(op_pair) = inners.next() {
         let op = parse_bin_op(op_pair)?;
-        let right_pair = inners
-            .next()
-            .ok_or_else(|| "Expected right-hand side of expression".to_string())?;
-        let right = parse_unary(right_pair)?;
-        left = Expr::BinOp {
-            left: Box::new(left),
-            op,
-            right: Box::new(right),
-        };
+        while operators.last().is_some_and(|previous| {
+            binary_precedence(previous) >= binary_precedence(&op)
+        }) {
+            reduce_binary(&mut values, &mut operators)?;
+        }
+        let right = inners.next().ok_or_else(|| "Expected right-hand side".to_string())?;
+        operators.push(op);
+        values.push(parse_unary(right)?);
     }
-    Ok(left)
+    while !operators.is_empty() {
+        reduce_binary(&mut values, &mut operators)?;
+    }
+    if values.len() != 1 {
+        return Err("Malformed expression".to_string());
+    }
+    values.pop().ok_or_else(|| "Missing expression".to_string())
 }
 
 fn parse_unary(pair: pest::iterators::Pair<Rule>) -> Result<Expr, String> {
@@ -989,7 +1036,7 @@ fn parse_bin_op(pair: pest::iterators::Pair<Rule>) -> Result<BinOp, String> {
         "^" => BinOp::BitXor,
         "<<" => BinOp::Shl,
         ">>" => BinOp::Shr,
-        _ => BinOp::Add,
+        _ => return Err("Unknown binary operator".to_string()),
     })
 }
 
@@ -1113,6 +1160,49 @@ fn parse_contract_def(pair: pest::iterators::Pair<Rule>) -> Result<ContractDef, 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn omega_function(source: &str) -> FnDef {
+        let program = parse_program(source).expect("parse function");
+        match program.items.into_iter().next() {
+            Some(Item::Function(function)) => function,
+            _ => panic!("expected function"),
+        }
+    }
+
+    #[test]
+    fn omega_parser_precedence_and_tail() {
+        let function = omega_function("fn f() -> u64 { 1 + 2 * 3 }");
+        match function.body.expr.as_deref() {
+            Some(Expr::BinOp { op: BinOp::Add, right, .. }) => {
+                assert!(matches!(right.as_ref(), Expr::BinOp { op: BinOp::Mul, .. }));
+            }
+            other => panic!("incorrect expression AST: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn omega_empty_then_retains_else() {
+        let function = omega_function("fn f(mut x: u64) { if x > 0 {} else { x = 1; } }");
+        match &function.body.stmts[0] {
+            Stmt::If { then_block, else_block: Some(other), .. } => {
+                assert!(then_block.stmts.is_empty());
+                assert_eq!(other.stmts.len(), 1);
+            }
+            other => panic!("incorrect branch AST: {:?}", other),
+        }
+    }
+
+    #[test]
+    fn omega_assignment_target_is_not_truncated() {
+        assert!(parse_program("fn f() { x.a.b = 1; }").is_err());
+        let function = omega_function("fn f() { x[1] = 2; }");
+        assert!(matches!(&function.body.stmts[0], Stmt::Assign { target: LValue::Index { .. }, .. }));
+    }
+
+    #[test]
+    fn omega_chained_comparison_fails_closed() {
+        assert!(parse_program("fn f(a: u64, b: u64, c: u64) where { a < b < c } {}").is_err());
+    }
 
     #[test]
     fn test_parse_simple_fn() {

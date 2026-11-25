@@ -42,7 +42,7 @@ pub fn cmd_build(file: &Path, output: &Path, target: &str, timeout_ms: u64) {
             std::process::exit(1);
         }
     };
-    let function_count = program_function_count(&program);
+    let function_count = verifier::program_function_count(&program);
 
     // Type checking pass
     eprintln!("  {} Type checking...", "→".bright_blue());
@@ -67,8 +67,7 @@ pub fn cmd_build(file: &Path, output: &Path, target: &str, timeout_ms: u64) {
     );
     verifier::print_results(&results);
 
-    let all_ok =
-        function_count > 0 && results.len() == function_count && results.iter().all(|r| r.verified);
+    let all_ok = verifier::verification_succeeded(&results, function_count);
     if !all_ok {
         if results.is_empty() {
             error!("Build aborted: no verification obligations found");
@@ -215,12 +214,12 @@ pub fn cmd_build(file: &Path, output: &Path, target: &str, timeout_ms: u64) {
     }
 
     // ── CORTEX Provenance Manifest ───────────────────────────────────
-    emit_cortex_manifest(file, output, timeout_ms, &results);
+    emit_cortex_manifest(file, &source, output, timeout_ms, &results);
 }
 
-fn unsupported_build_feature(program: &Program, target: &str) -> Option<&'static str> {
-    if target == "silicon" {
-        return None;
+pub(crate) fn unsupported_build_feature(program: &Program, target: &str) -> Option<&'static str> {
+    if target != "rust" {
+        return Some("LLVM and silicon outputs are quarantined pending differential execution validation");
     }
     if program.items.iter().any(item_uses_u256_or_big_literal) {
         return Some(match target {
@@ -405,14 +404,6 @@ fn expr_uses_address_literal(expr: &Expr) -> bool {
     }
 }
 
-fn program_function_count(program: &crate::core::ast::Program) -> usize {
-    program.items.iter().fold(0, |functions, item| match item {
-        crate::core::ast::Item::Function(_) => functions + 1,
-        crate::core::ast::Item::Contract(contract) => functions + contract.functions.len(),
-        _ => functions,
-    })
-}
-
 /// Emit a CORTEX provenance manifest alongside the compiled output.
 ///
 /// The manifest contains proof_hash, invariant counts, and verification
@@ -420,6 +411,7 @@ fn program_function_count(program: &crate::core::ast::Program) -> usize {
 /// `cortex-persist/cortex/engine/anvil_bridge.py` consumes.
 fn emit_cortex_manifest(
     source_file: &Path,
+    source: &str,
     output: &Path,
     timeout_ms: u64,
     results: &[verifier::VerifyResult],
@@ -442,14 +434,25 @@ fn emit_cortex_manifest(
         })
         .collect();
 
+    use sha2::{Digest, Sha256};
+    let artifact_path = output.with_extension("rs");
+    let artifact = std::fs::read(&artifact_path).unwrap_or_else(|error| {
+        eprintln!("Cannot bind generated artifact: {}", error);
+        std::process::exit(1);
+    });
     let manifest = serde_json::json!({
-        "schema_version": "1.0",
+        "schema_version": "2.0",
+        "source_sha256": hex::encode(Sha256::digest(source.as_bytes())),
+        "artifact_sha256": hex::encode(Sha256::digest(&artifact)),
+        "artifact_kind": "rust_source",
+        "independent_certificate": false,
+        "execution_attested": false,
         "anvil_version": env!("CARGO_PKG_VERSION"),
         "source_file": source_file.to_string_lossy(),
         "timeout_ms": timeout_ms,
         "timestamp": chrono::Utc::now().to_rfc3339(),
         "verifier": "anvil-z3",
-        "fact_type": "anvil_verified_execution",
+        "fact_type": "anvil_source_check",
         "functions": functions,
         "total_proven": results.iter().filter(|r| r.verified).count(),
         "total_failed": results.iter().filter(|r| !r.verified).count(),

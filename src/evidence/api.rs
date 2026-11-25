@@ -33,20 +33,19 @@ pub async fn get_provenance(
         }
     };
 
-    // Parse the output_hash or value if embedded. For Phase C contract,
-    // we return a deterministic value matching the hash or just pass dummy values for observations
-    // since the ledger schema doesn't yet store deep observation counts.
+    // Persisted does not mean attested. Legacy/demo rows cannot acquire authority.
+    let observed = event.source_type == "runtime_observation";
     let response = MetricProvenanceResponse {
         metric_id: event.metric_id,
         value: event.metric_value,
         provenance: ProvenanceInfo {
-            level: "C5_REAL".to_string(),
+            level: if observed { "OBSERVED_UNATTESTED" } else { "LEGACY_UNATTESTED" }.to_string(),
             source: ProvenanceSource {
                 registry_id: event.source_type,
             },
             observations: ProvenanceObservations {
-                count: 3,
-                treatments: 350,
+                count: None,
+                treatments: None,
             },
             derivation: ProvenanceDerivation {
                 method: event.transformation,
@@ -55,7 +54,7 @@ pub async fn get_provenance(
         },
         data_origin: DataOrigin {
             ledger: true,
-            mock: false,
+            mock: !observed,
             replay: false,
         },
     };

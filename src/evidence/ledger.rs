@@ -20,8 +20,8 @@ pub struct ProvenanceSource {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProvenanceObservations {
-    pub count: u32,
-    pub treatments: u32,
+    pub count: Option<u32>,
+    pub treatments: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

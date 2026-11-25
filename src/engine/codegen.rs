@@ -288,6 +288,11 @@ fn gen_block(block: &Block, indent: usize) -> String {
         }
     }
 
+    if let Some(expr) = &block.expr {
+        out.push_str(&pad);
+        out.push_str(&gen_expr(expr));
+        out.push('\n');
+    }
     out
 }
 
@@ -332,7 +337,7 @@ fn gen_expr(expr: &Expr) -> String {
     match expr {
         Expr::IntLit(n) => n.to_string(),
         Expr::BigIntLit(n) => n.clone(),
-        Expr::FloatLit(f) => f.to_string(),
+        Expr::FloatLit(f) => format!("{:?}", f),
         Expr::BoolLit(b) => b.to_string(),
         Expr::StringLit(s) => format!("\"{}\"", s),
         Expr::HexLit(h) => h.clone(),

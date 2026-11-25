@@ -1,5 +1,6 @@
 import * as crypto from 'crypto';
 import { ethers } from 'ethers';
+import { canonicalTraceJson } from './canonical_trace.mjs';
 
 export interface TraceData {
     agentId: string;
@@ -50,8 +51,8 @@ export class ArchiTrace {
             toolCalls: this.toolCalls
         };
 
-        const traceString = JSON.stringify(traceData, Object.keys(traceData).sort());
-        const hash = crypto.createHash('sha256').update(traceString).digest('hex');
+        const traceString = canonicalTraceJson(traceData);
+        const hash = crypto.createHash('sha256').update('ARCHI_TRACE_V2\0').update(traceString).digest('hex');
         
         console.log(`[Archi-SDK] Finalized trace. Hash: ${hash}`);
         return hash;

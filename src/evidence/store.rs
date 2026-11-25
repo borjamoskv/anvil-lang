@@ -4,10 +4,7 @@ use sqlx::sqlite::SqlitePool;
 use uuid::Uuid;
 
 pub async fn initialize_ledger_table(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    sqlx::query("DROP TABLE IF EXISTS traceability_ledger")
-        .execute(pool)
-        .await?;
-
+    // Production initialization must preserve all existing evidence.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS traceability_ledger (
             event_id TEXT PRIMARY KEY,
@@ -30,10 +27,16 @@ pub async fn initialize_ledger_table(pool: &SqlitePool) -> Result<(), sqlx::Erro
     .execute(pool)
     .await?;
 
+    for statement in [
+        "CREATE TRIGGER IF NOT EXISTS traceability_no_update BEFORE UPDATE ON traceability_ledger BEGIN SELECT RAISE(ABORT, 'append-only ledger'); END",
+        "CREATE TRIGGER IF NOT EXISTS traceability_no_delete BEFORE DELETE ON traceability_ledger BEGIN SELECT RAISE(ABORT, 'append-only ledger'); END",
+    ] {
+        sqlx::query(statement).execute(pool).await?;
+    }
     Ok(())
 }
 
-// C5-REAL: Append-only ledger interface. No updates allowed.
+// Append-only ledger interface. No updates allowed.
 #[allow(clippy::too_many_arguments)]
 pub async fn append_ledger_event(
     pool: &SqlitePool,
@@ -106,4 +109,30 @@ pub async fn get_ledger_event(
     });
 
     Ok(record)
+}
+
+#[cfg(test)]
+mod omega_tests {
+    use super::*;
+    use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+
+    #[tokio::test]
+    async fn omega_ledger_survives_reopen_and_rejects_mutation() {
+        let directory = tempfile::tempdir().unwrap();
+        let options = SqliteConnectOptions::new()
+            .filename(directory.path().join("ledger.db"))
+            .create_if_missing(true);
+        let pool = SqlitePoolOptions::new().max_connections(1)
+            .connect_with(options.clone()).await.unwrap();
+        initialize_ledger_table(&pool).await.unwrap();
+        append_ledger_event(&pool, "test".into(), 1.0, None, "test".into(),
+            "source".into(), "test".into(), "output".into()).await.unwrap();
+        pool.close().await;
+        let reopened = SqlitePoolOptions::new().max_connections(1)
+            .connect_with(options).await.unwrap();
+        initialize_ledger_table(&reopened).await.unwrap();
+        assert!(get_ledger_event(&reopened, "test").await.unwrap().is_some());
+        assert!(sqlx::query("UPDATE traceability_ledger SET metric_value = 2").execute(&reopened).await.is_err());
+        assert!(sqlx::query("DELETE FROM traceability_ledger").execute(&reopened).await.is_err());
+    }
 }

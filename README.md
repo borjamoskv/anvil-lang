@@ -1,10 +1,12 @@
 # anvil-lang
 
+> **Remediation candidate, not certified.** Source checking is not an independent proof certificate or execution attestation. Loop verification, early/nested returns, tail-expression verification, branch-local bindings, and LLVM/silicon builds are temporarily disabled in the verification/build paths pending soundness work.
+
 > **Formally Verified Domain-Specific Systems Language & Runtime with Z3 SMT and Lean 4 Proof Guarantees.**
 
-[![CI Pipeline](https://img.shields.io/badge/CI_Workflow-Passing-brightgreen?style=flat-square)](https://github.com/borjamoskv/anvil-lang/actions)
+[![Anvil CI](https://github.com/borjamoskv/anvil-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/borjamoskv/anvil-lang/actions)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](./LICENSE)
-[![Rust](https://img.shields.io/badge/Rust-2021_Edition-orange?style=flat-square)](./Cargo.toml)
+[![Rust](https://img.shields.io/badge/Rust-2024_Edition-orange?style=flat-square)](./Cargo.toml)
 [![Verification](https://img.shields.io/badge/Verification-Z3_SMT_%2B_Lean_4-0ea5e9?style=flat-square)](#architecture)
 
 `anvil-lang` is a domain-specific systems programming language designed for deterministic agent execution, cryptographic proof markets, and formal verification of computational contracts prior to runtime dispatch.

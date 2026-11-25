@@ -303,7 +303,7 @@ async fn verify_contract(
 
         // 3. Verify with Z3
         let results = verifier::verify_program(&program, &type_env);
-        let all_ok = !results.is_empty() && results.iter().all(|r| r.verified);
+        let all_ok = verifier::verification_succeeded(&results, verifier::program_function_count(&program));
 
         if !all_ok {
             if results.is_empty() {
@@ -361,7 +361,7 @@ async fn verify_contract(
 
         Json(VerifyResponse {
             status: "VERIFIED".to_string(),
-            message: "Code mathematically proven. Cryptographic certificate issued.".to_string(),
+            message: "Source-level solver check passed. Hash identifies source only; no independent certificate or execution attestation.".to_string(),
             certificate_hash: Some(format!("0x{}", hex_hash)),
             timestamp: chrono::Utc::now().to_rfc3339(),
         }).into_response()
@@ -634,7 +634,7 @@ async fn build_contract(
 
         // 3. Verify with Z3
         let results = verifier::verify_program(&program, &type_env);
-        let all_ok = !results.is_empty() && results.iter().all(|r| r.verified);
+        let all_ok = verifier::verification_succeeded(&results, verifier::program_function_count(&program));
 
         if !all_ok {
             counter!("anvil_build_result", "status" => "rejected", "reason" => "verification_failed").increment(1);
@@ -647,7 +647,15 @@ async fn build_contract(
             })).into_response();
         }
 
-        // 4. Generate Target Code (Rust, LLVM, or Silicon)
+        if let Some(reason) = crate::cli::build::unsupported_build_feature(&program, &payload.target) {
+            return (StatusCode::UNPROCESSABLE_ENTITY, Json(BuildContractResponse {
+                status: "REJECTED".to_string(),
+                message: reason.to_string(),
+                output_code: None,
+                timestamp: chrono::Utc::now().to_rfc3339(),
+            })).into_response();
+        }
+        // 4. Generate Target Code (Rust source only during quarantine)
         let output_code = match payload.target.as_str() {
             "llvm" => llvm_ir::generate_llvm_ir(&program),
             "silicon" => crate::singularity::synthesize_ast_to_verilog(&program),
@@ -664,7 +672,7 @@ async fn build_contract(
 
         Json(BuildContractResponse {
             status: "VERIFIED".to_string(),
-            message: format!("Code proven. Successfully transpiled to {}.", payload.target),
+            message: format!("Source-level check passed. Transpiled to {}; execution equivalence is not attested.", payload.target),
             output_code: Some(output_code),
             timestamp: chrono::Utc::now().to_rfc3339(),
         }).into_response()

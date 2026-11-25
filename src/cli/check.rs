@@ -570,7 +570,7 @@ fn aggregate_status(results: &[verifier::VerifyResult], all_ok: bool) -> &'stati
 }
 
 fn verification_succeeded(results: &[verifier::VerifyResult], fn_count: usize) -> bool {
-    fn_count > 0 && results.len() == fn_count && results.iter().all(|result| result.verified)
+    verifier::verification_succeeded(results, fn_count)
 }
 
 fn verify_result_status(result: &verifier::VerifyResult) -> &'static str {

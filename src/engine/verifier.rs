@@ -85,7 +85,7 @@ impl<'ctx> BodyEncoding<'ctx> {
         self.fresh_counter += 1;
         BV::new_const(
             ctx,
-            format!("{}_{}", prefix, self.fresh_counter).as_str(),
+            format!("$anvil.internal.{}.{}", prefix, self.fresh_counter).as_str(),
             SOLVER_BV_WIDTH,
         )
     }
@@ -154,6 +154,48 @@ pub fn verify_program_with_options(
     results
 }
 
+// Temporary soundness quarantine: these constructs require a CFG with
+// terminating paths, arbitrary-state induction, or guarded local bindings.
+// Never silently approximate them as a successful proof.
+fn soundness_subset(block: &Block, root: bool) -> Result<(), &'static str> {
+    if block.expr.is_some() {
+        return Err("Tail-expression verification is not yet supported");
+    }
+    for (index, stmt) in block.stmts.iter().enumerate() {
+        match stmt {
+            Stmt::While { .. } => return Err("Loop verification quarantined pending induction repair"),
+            Stmt::Return(_) if !root || index + 1 != block.stmts.len() => {
+                return Err("Early or nested returns require terminating CFG paths");
+            }
+            Stmt::Let { .. } | Stmt::Ghost { .. } if !root => {
+                return Err("Branch-local bindings require guarded scoped SSA");
+            }
+            Stmt::If { then_block, else_block, .. } => {
+                soundness_subset(then_block, false)?;
+                if let Some(other) = else_block {
+                    soundness_subset(other, false)?;
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+pub fn program_function_count(program: &Program) -> usize {
+    program.items.iter().map(|item| match item {
+        Item::Function(_) => 1,
+        Item::Contract(contract) => contract.functions.len(),
+        _ => 0,
+    }).sum()
+}
+
+pub fn verification_succeeded(results: &[VerifyResult], function_count: usize) -> bool {
+    function_count > 0
+        && results.len() == function_count
+        && results.iter().all(|result| result.verified)
+}
+
 fn verify_function(
     func: &FnDef,
     _type_env: &TypeEnv,
@@ -165,46 +207,11 @@ fn verify_function(
     let _span = info_span!("verify_function", fn_name = %func.name).entered();
     let start = Instant::now();
 
-    // Extract raw preconditions first to find known constants
-    let preconditions_raw: Vec<&Invariant> = func
-        .invariants
-        .iter()
-        .filter(|inv| !invariant_uses_post(&inv.expr))
-        .collect();
-    let constants = collect_known_constants(&preconditions_raw);
-
-    // Simplify the function AST
-    let mut simplified_func = func.clone();
-    simplified_func.invariants = simplified_func
-        .invariants
-        .into_iter()
-        .map(|inv| Invariant {
-            expr: simplify_invariant_expr(&inv.expr, &constants),
-            span: inv.span,
-        })
-        .collect();
-    simplified_func.assumes = simplified_func
-        .assumes
-        .into_iter()
-        .map(|inv| Invariant {
-            expr: simplify_invariant_expr(&inv.expr, &constants),
-            span: inv.span,
-        })
-        .collect();
-    simplified_func.body = simplify_block(&simplified_func.body, &constants);
-
-    // Simplify contract invariants
-    let simplified_contract_invariants: Vec<Invariant> = contract_invariants
-        .iter()
-        .map(|inv| Invariant {
-            expr: simplify_invariant_expr(&inv.expr, &constants),
-            span: inv.span.clone(),
-        })
-        .collect();
-
-    // Shadow func and contract_invariants so the rest of the function operates on the simplified AST
-    let func = &simplified_func;
-    let contract_invariants = &simplified_contract_invariants;
+    // Do not apply algebraic rewrites or propagate entry-state constants into
+    // later program states until the rewrites have independently checked proofs.
+    if let Err(reason) = soundness_subset(&func.body, true) {
+        return unverified_result(func, 0, 0, start, reason);
+    }
 
     let mut cfg = Config::new();
     cfg.set_timeout_msec(options.timeout_ms);
@@ -1136,8 +1143,7 @@ fn encode_block<'ctx>(
                         .var_types
                         .insert(name.clone(), Type::Arena(*capacity));
 
-                    let local_var =
-                        BV::new_const(ctx, format!("local_{}", name).as_str(), SOLVER_BV_WIDTH);
+                    let local_var = encoding.fresh_bv(ctx, &format!("local_{}", name));
                     solver.assert(&local_var._eq(&BV::from_i64(ctx, 0, SOLVER_BV_WIDTH)));
                     encoding.current_vars.insert(name.clone(), local_var);
                 } else if let Some(z3_val) =
@@ -1145,8 +1151,7 @@ fn encode_block<'ctx>(
                 {
                     process_alloc_side_effects(value, ctx, solver, encoding);
 
-                    let local_var =
-                        BV::new_const(ctx, format!("local_{}", name).as_str(), SOLVER_BV_WIDTH);
+                    let local_var = encoding.fresh_bv(ctx, &format!("local_{}", name));
                     solver.assert(&local_var._eq(&z3_val));
                     if let Some(binding_ty) = ty
                         .clone()
@@ -1289,8 +1294,7 @@ fn encode_block<'ctx>(
                 let mut loop_modified_names: Vec<&String> = loop_modified.iter().collect();
                 loop_modified_names.sort();
                 for var_name in loop_modified_names {
-                    let havoc_name = format!("{}_loop_exit", var_name);
-                    let havoc_var = BV::new_const(ctx, havoc_name.as_str(), SOLVER_BV_WIDTH);
+                    let havoc_var = encoding.fresh_bv(ctx, &format!("{}_loop_exit", var_name));
                     encoding.current_vars.insert(var_name.clone(), havoc_var);
                     encoding.modified.insert(var_name.clone());
                 }
@@ -1371,15 +1375,30 @@ fn encode_block<'ctx>(
 
                     // 1. Encode 'then' branch
                     let mut then_encoding = encoding.branch_from(saved_current.clone());
+                    solver.push();
+                    solver.assert(&cond_z3);
                     encode_block(ctx, solver, then_block, &mut then_encoding);
+                    let then_assertions = solver.get_assertions();
+                    solver.pop(1);
                     let then_modified = then_encoding.modified.clone();
                     let then_current = then_encoding.current_vars.clone();
 
                     // 2. Encode 'else' branch
                     let mut else_encoding = encoding.branch_from(saved_current.clone());
                     else_encoding.fresh_counter = then_encoding.fresh_counter;
+                    let else_cond = cond_z3.not();
+                    solver.push();
+                    solver.assert(&else_cond);
                     if let Some(eb) = else_block {
                         encode_block(ctx, solver, eb, &mut else_encoding);
+                    }
+                    let else_assertions = solver.get_assertions();
+                    solver.pop(1);
+                    for assertion in then_assertions {
+                        solver.assert(&cond_z3.implies(&assertion));
+                    }
+                    for assertion in else_assertions {
+                        solver.assert(&else_cond.implies(&assertion));
                     }
                     let else_modified = else_encoding.modified.clone();
                     let else_current = else_encoding.current_vars.clone();
@@ -1435,8 +1454,7 @@ fn encode_block<'ctx>(
                 if let Some(z3_val) =
                     expr_to_z3(ctx, value, &encoding.current_vars, &encoding.signed_vars)
                 {
-                    let ghost_var =
-                        BV::new_const(ctx, format!("ghost_{}", name).as_str(), SOLVER_BV_WIDTH);
+                    let ghost_var = encoding.fresh_bv(ctx, &format!("ghost_{}", name));
                     solver.assert(&ghost_var._eq(&z3_val));
                     if type_is_signed(ty) {
                         encoding.signed_vars.insert(name.clone());

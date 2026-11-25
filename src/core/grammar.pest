@@ -164,11 +164,12 @@ fn_call_inv    =  { ident ~ "(" ~ (additive ~ ("," ~ additive)*)? ~ ")" }
 field_access_inv = { ident ~ ("." ~ ident_post)+ }
 
 // --- Binary Operators ---
-binary_op = _{ and_op | or_op | cmp_op | bit_op | add_expr_op | mul_expr_op }
+binary_op = _{ and_op | or_op | shift_op | cmp_op | bit_op | add_expr_op | mul_expr_op }
+shift_op    = { "<<" | ">>" }
 and_op      = { "&&" }
 or_op       = { "||" }
 cmp_op      = { "==" | "!=" | "<=" | ">=" | "<" | ">" }
-bit_op      = { "<<" | ">>" | "&" | "|" | "^" }
+bit_op      = { "&" | "|" | "^" }
 add_expr_op = { "+" | "-" }
 mul_expr_op = { "*" | "/" | "%" }
 
