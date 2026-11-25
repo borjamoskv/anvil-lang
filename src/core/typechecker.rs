@@ -390,6 +390,11 @@ fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str, expected_return:
                 } else if let Some(ref inferred) = infer_expr_type(value, env) {
                     env.bind_mut(name.clone(), inferred.clone(), *is_mut);
                     env.register_constraints(name, inferred);
+                } else {
+                    env.errors.push(TypeError {
+                        message: format!("Cannot infer type of binding '{}'; explicit supported type required", name),
+                        location: fn_name.to_string(),
+                    });
                 }
             }
             Stmt::Assign { target, value, .. } => {
@@ -537,9 +542,6 @@ fn check_declared_expr(
             location: location.to_string(),
         });
     } else {
-        if expr_contains_fncall(expr) {
-            return;
-        }
         env.errors.push(TypeError {
             message: format!(
                 "{} '{}' declared as {} but initialized with incompatible expression",
@@ -843,8 +845,19 @@ fn infer_expr_type(expr: &Expr, env: &TypeEnv) -> Option<Type> {
                 _ => {
                     // Arithmetic: promote to wider type
                     match (lt, rt) {
-                        (Some(l), Some(r)) => Some(promote_types(&l, &r)),
-                        (Some(t), None) | (None, Some(t)) => Some(t),
+                        (Some(l), Some(r)) if is_unsigned(&l) || is_signed(&l) => {
+                            if !(is_unsigned(&r) || is_signed(&r)) {
+                                None
+                            } else if same_signedness(&l, &r) {
+                                Some(promote_types(&l, &r))
+                            } else if expr_fits_type(right, &l) {
+                                Some(l)
+                            } else if expr_fits_type(left, &r) {
+                                Some(r)
+                            } else {
+                                None
+                            }
+                        }
                         _ => None,
                     }
                 }

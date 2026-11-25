@@ -1997,3 +1997,89 @@ fn test_saas_build_endpoint_via_cli() {
         code
     );
 }
+
+// OMEGA-21: real CLI regressions. These must run against the compiled binary.
+fn omega_expect_rejection(name: &str, source: &str) {
+    let path = temp_anvil_source(name, source);
+    let (success, json, stdout, stderr) = run_anvil_check_json_path(&path);
+    let _ = std::fs::remove_file(&path);
+    assert!(!success, "expected fail-closed: {}\n{}\n{}", json, stdout, stderr);
+    assert_ne!(json["status"], "VERIFIED");
+}
+
+#[test]
+fn soundness_omega_stale_entry_constants() {
+    omega_expect_rejection("omega_stale", r#"
+fn f(mut x: u64, mut y: u64) -> u64
+    where { x == 5, y' == 10 }
+{
+    x = x + 1;
+    y = x * 2;
+    return y;
+}
+"#);
+}
+
+#[test]
+fn soundness_omega_signed_division() {
+    omega_expect_rejection("omega_signed_div", r#"
+fn f(x: i64) -> i64
+    where { x == -3, result' >= 0 }
+{
+    return x / 2;
+}
+"#);
+}
+
+#[test]
+fn soundness_omega_early_returns_are_quarantined() {
+    omega_expect_rejection("omega_return", r#"
+fn f(flag: bool) -> u64
+    where { result' == 2 }
+{
+    if flag { return 1; }
+    return 2;
+}
+"#);
+}
+
+#[test]
+fn soundness_omega_loop_induction_is_quarantined() {
+    omega_expect_rejection("omega_loop", r#"
+fn f(mut i: u64, mut x: u64) -> u64
+    where { i == 0, x == 0, x' == 0 }
+{
+    while i < 10 where { x == 0 } {
+        x += i;
+        i += 1;
+    }
+    return x;
+}
+"#);
+}
+
+#[test]
+fn soundness_omega_arithmetic_rejects_nonnumeric_operands() {
+    omega_expect_rejection("omega_types", r#"
+fn f() -> u8 where { result' == 1 }
+{
+    let x: u8 = "a" + 1;
+    return x;
+}
+"#);
+}
+
+#[test]
+fn soundness_omega_backend_quarantine() {
+    let path = temp_anvil_source("omega_backend", r#"
+fn f(x: u64) -> u64 where { result' == x }
+{
+    return x;
+}
+"#);
+    for target in ["llvm", "silicon"] {
+        let (success, output) = run_anvil_build_path(&path, target);
+        assert!(!success && output.contains("quarantined"), "{}", output);
+    }
+    let _ = std::fs::remove_file(&path);
+}

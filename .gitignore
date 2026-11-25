@@ -1,6 +1,6 @@
 /target/
 **/*.rs.bk
-Cargo.lock
+# Application lockfiles must be tracked for reproducible builds.
 *.swp
 *.swo
 .DS_Store

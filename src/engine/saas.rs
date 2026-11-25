@@ -9,7 +9,6 @@ use axum::{
 use metrics::{counter, histogram};
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tracing::{Instrument, error, info, info_span};
@@ -343,26 +342,19 @@ async fn verify_contract(
             }).into_response();
         }
 
-        // 4. Issue Cryptographic Certificate
-        let mut hasher = Sha256::new();
-        hasher.update(b"ANVIL_VERIFIED_V1:");
-        hasher.update(payload.source_code.as_bytes());
-        let hash_result = hasher.finalize();
-        let hex_hash = hex::encode(hash_result);
-
+        // Source verification is not a cryptographic certificate.
         counter!("anvil_verify_result", "status" => "verified").increment(1);
         let duration = start.elapsed().as_secs_f64();
         histogram!("anvil_verify_duration_seconds").record(duration);
         info!(
-            certificate = %format!("0x{}", &hex_hash[..16]),
             duration_ms = duration * 1000.0,
-            "Verification successful — certificate issued"
+            "Source check successful; no independent certificate issued"
         );
 
         Json(VerifyResponse {
-            status: "VERIFIED".to_string(),
-            message: "Source-level solver check passed. Hash identifies source only; no independent certificate or execution attestation.".to_string(),
-            certificate_hash: Some(format!("0x{}", hex_hash)),
+            status: "VERIFIED_SOURCE".to_string(),
+            message: "Source-level solver check passed; no independent certificate or execution attestation.".to_string(),
+            certificate_hash: None,
             timestamp: chrono::Utc::now().to_rfc3339(),
         }).into_response()
     }.instrument(span).await
@@ -671,7 +663,7 @@ async fn build_contract(
         );
 
         Json(BuildContractResponse {
-            status: "VERIFIED".to_string(),
+            status: "VERIFIED_SOURCE".to_string(),
             message: format!("Source-level check passed. Transpiled to {}; execution equivalence is not attested.", payload.target),
             output_code: Some(output_code),
             timestamp: chrono::Utc::now().to_rfc3339(),

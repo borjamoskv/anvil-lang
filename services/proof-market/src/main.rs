@@ -6,7 +6,6 @@ use axum::{
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs::File;
@@ -79,9 +78,30 @@ struct AnvilCheckJsonReport {
     message: Option<String>,
     error: Option<String>,
     proof_hash: Option<String>,
+    all_verified: Option<bool>,
+    functions: Option<usize>,
+    summary: Option<AnvilCheckSummary>,
+    results: Option<Vec<AnvilFunctionResult>>,
     errors: Option<Vec<AnvilCheckJsonDiagnostic>>,
     warnings: Option<Vec<AnvilCheckJsonDiagnostic>>,
     counterexamples: Option<Vec<AnvilCheckJsonCounterexample>>,
+}
+
+#[derive(Deserialize)]
+struct AnvilCheckSummary {
+    functions_total: usize,
+    functions_verified: usize,
+    functions_failed: usize,
+    errors_total: usize,
+    counterexamples_total: usize,
+}
+
+#[derive(Deserialize)]
+struct AnvilFunctionResult {
+    fn_name: String,
+    status: String,
+    verified: bool,
+    proof_hash: String,
 }
 
 #[derive(Deserialize)]
@@ -372,7 +392,20 @@ mod tests {
             }"#,
         )
         .unwrap();
-        assert!(check_report_is_success(&report));
+        assert!(!check_report_is_success(&report));
+
+        let digest = "a".repeat(64);
+        let full: AnvilCheckJsonReport = serde_json::from_value(serde_json::json!({
+            "schema_version": "anvil.check.v1", "anvil_version": "0.6.0",
+            "kind": "check", "status": "VERIFIED", "ok": true,
+            "all_verified": true, "functions": 1, "proof_hash": digest.clone(),
+            "summary": { "functions_total": 1, "functions_verified": 1,
+                "functions_failed": 0, "errors_total": 0, "counterexamples_total": 0 },
+            "results": [{ "fn_name": "f", "status": "VERIFIED", "verified": true,
+                "proof_hash": digest }],
+            "errors": [], "counterexamples": []
+        })).unwrap();
+        assert!(check_report_is_success(&full));
 
         let empty_report: AnvilCheckJsonReport = serde_json::from_str("{}").unwrap();
         assert!(!check_report_is_success(&empty_report));
@@ -674,10 +707,7 @@ fn run_anvil_check_process(
     limits: ProcessLimits,
 ) -> Result<ProcessOutput, AnvilProcessError> {
     let output = run_anvil_check_process_once(cmd_path, temp_path, workspace_root, limits, true)?;
-    if should_retry_without_check_json(&output) {
-        return run_anvil_check_process_once(cmd_path, temp_path, workspace_root, limits, false);
-    }
-
+    // Legacy text is never a certificate-bearing report.
     Ok(output)
 }
 
@@ -964,24 +994,44 @@ fn parse_check_json(output: &ProcessOutput) -> Option<AnvilCheckJsonReport> {
 }
 
 fn has_structured_success(output: &ProcessOutput) -> bool {
+    if output.truncated || !output.status.success() {
+        return false;
+    }
     parse_check_json(output)
         .map(|report| check_report_is_success(&report))
         .unwrap_or(false)
 }
 
+fn is_digest(value: &str) -> bool {
+    value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
 fn check_report_is_success(report: &AnvilCheckJsonReport) -> bool {
+    let (Some(total), Some(summary), Some(results)) =
+        (report.functions, &report.summary, &report.results) else {
+            return false;
+        };
     report.schema_version.as_deref() == Some("anvil.check.v1")
-        && report
-            .anvil_version
-            .as_ref()
-            .is_some_and(|version| !version.trim().is_empty())
+        && report.anvil_version.as_ref().is_some_and(|version| !version.trim().is_empty())
         && report.kind.as_deref() == Some("check")
         && report.status.as_deref() == Some("VERIFIED")
         && report.ok == Some(true)
-        && report
-            .proof_hash
-            .as_ref()
-            .is_some_and(|hash| !hash.trim().is_empty())
+        && report.all_verified == Some(true)
+        && report.proof_hash.as_deref().is_some_and(is_digest)
+        && report.error.is_none()
+        && report.errors.as_ref().is_some_and(Vec::is_empty)
+        && report.counterexamples.as_ref().is_some_and(Vec::is_empty)
+        && total > 0
+        && summary.functions_total == total
+        && summary.functions_verified == total
+        && summary.functions_failed == 0
+        && summary.errors_total == 0
+        && summary.counterexamples_total == 0
+        && results.len() == total
+        && results.iter().all(|result| {
+            !result.fn_name.is_empty() && result.status == "VERIFIED"
+                && result.verified && is_digest(&result.proof_hash)
+        })
 }
 
 fn is_solver_exhaustion_text(output: &str) -> bool {
@@ -1150,20 +1200,19 @@ async fn prove_handler(request: Request<Body>) -> impl IntoResponse {
         );
     }
 
-    let certificate_secret = match certificate_secret() {
-        Ok(secret) => secret,
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProveResponse {
-                    status: "CONFIGURATION_ERROR".to_string(),
-                    execution_time_ms: 0.0,
-                    certificate_hash: None,
-                    z3_output: e,
-                }),
-            );
-        }
-    };
+    // Paid certification is suspended until an independent proof checker exists.
+    // Local mock mode remains available to exercise source-check regressions.
+    if !wants_mock_payment(&payload) {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            Json(ProveResponse {
+                status: "CERTIFICATION_UNAVAILABLE".to_string(),
+                execution_time_ms: 0.0,
+                certificate_hash: None,
+                z3_output: "Independent certification is quarantined; no payment session consumed.".to_string(),
+            }),
+        );
+    }
 
     let mut paid_stripe_session = None;
 
@@ -1349,7 +1398,7 @@ async fn prove_handler(request: Request<Body>) -> impl IntoResponse {
             let raw_combined = raw_output_text(&out);
 
             if out.status.success() {
-                if !has_structured_success(&out) && !legacy_anvil_output_enabled() {
+                if !has_structured_success(&out) {
                     return (
                         StatusCode::BAD_GATEWAY,
                         Json(ProveResponse {
@@ -1361,21 +1410,12 @@ async fn prove_handler(request: Request<Body>) -> impl IntoResponse {
                     );
                 }
 
-                let mut hasher = Sha256::new();
-                let hash_payload = format!(
-                    "{}|{}|{}|{}",
-                    payload.client_id, payload.source_code, start_time, certificate_secret
-                );
-                hasher.update(hash_payload.as_bytes());
-                let result = hasher.finalize();
-                let cert_hash = format!("anv_cert_{}", hex::encode(result));
-
                 (
                     StatusCode::OK,
                     Json(ProveResponse {
-                        status: "PROVEN_SAFE".to_string(),
+                        status: "SOURCE_CHECK_PASSED".to_string(),
                         execution_time_ms: exec_time,
-                        certificate_hash: Some(cert_hash),
+                        certificate_hash: None,
                         z3_output: combined,
                     }),
                 )

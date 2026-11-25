@@ -21,14 +21,14 @@ SOVEREIGN = "crates/sovereign-compiler/Cargo.toml"
 GROUPS = ("build", "parse", "regression", "soundness", "verify", "other")
 INTEGRATION = ["integration-prepare"] + [f"integration-{group}" for group in GROUPS]
 QUICK = [
-    "runner-tests", "fmt-anvil", "fmt-market", "check-anvil", "check-market",
+    "runner-tests", "sdk-tests", "fmt-anvil", "fmt-market", "check-anvil", "check-market",
     "unit-anvil", "unit-market", "unit-sovereign", "lean-kernel",
 ]
 SUITES = {
     "quick": QUICK,
     "smoke": ["check-anvil", "unit-anvil", "build-anvil"] + INTEGRATION
     + ["doctor", "transfer", "saas"],
-    "full": ["runner-tests", "fmt-anvil", "fmt-market", "build-anvil", "build-market",
+    "full": ["runner-tests", "sdk-tests", "fmt-anvil", "fmt-market", "build-anvil", "build-market",
              "unit-anvil", "unit-market", "unit-sovereign", "lean-kernel"] + INTEGRATION
     + ["market-http", "market-amm", "hello", "transfer", "doctor", "saas",
        "release-anvil", "release-market"],
@@ -205,6 +205,7 @@ class Runner:
         cargo = ["cargo"]
         commands = {
             "runner-tests": [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_ci_runner.py"],
+            "sdk-tests": ["node", "--test", "agents-archi-mvp/sdk-ts/canonical_trace.test.mjs"],
             "fmt-anvil": cargo + ["fmt", "--", "--check"],
             "fmt-market": cargo + ["fmt", "--manifest-path", MARKET, "--", "--check"],
             "check-anvil": cargo + ["check", "--bin", "anvil"],

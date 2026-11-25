@@ -1003,6 +1003,46 @@ fn encode_body_effects<'ctx>(
     encoding
 }
 
+// Establish numeric range obligations before any range assertion can exclude
+// a reachable execution. A solver timeout is a rejection, never a proof.
+fn prove_binding_range<'ctx>(
+    ctx: &'ctx Context,
+    solver: &Solver<'ctx>,
+    value: &BV<'ctx>,
+    name: &str,
+    ty: &Type,
+) -> bool {
+    let zero = BV::from_u64(ctx, 0, SOLVER_BV_WIDTH);
+    let mut bounds = Vec::new();
+    for constraint in type_constraints_for_binding(name, ty) {
+        match constraint.kind {
+            ConstraintKind::NonNegative => bounds.push(value.bvuge(&zero)),
+            ConstraintKind::UpperBound { bits } if bits < SOLVER_BV_WIDTH => {
+                let Some(upper) = bv_pow2(ctx, bits) else { return false; };
+                bounds.push(value.bvult(&upper));
+            }
+            ConstraintKind::SignedBound { bits } if bits < SOLVER_BV_WIDTH => {
+                let Some(upper) = bv_pow2(ctx, bits - 1) else { return false; };
+                bounds.push(value.bvsge(&zero.bvsub(&upper)));
+                bounds.push(value.bvslt(&upper));
+            }
+            _ => {}
+        }
+    }
+    if *ty == Type::Bool {
+        bounds.push(value.bvule(&BV::from_u64(ctx, 1, SOLVER_BV_WIDTH)));
+    }
+    if bounds.is_empty() {
+        return true;
+    }
+    let refs: Vec<&Bool<'ctx>> = bounds.iter().collect();
+    solver.push();
+    solver.assert(&Bool::and(ctx, &refs).not());
+    let proven = solver.check() == SatResult::Unsat;
+    solver.pop(1);
+    proven
+}
+
 fn encode_block<'ctx>(
     ctx: &'ctx Context,
     solver: &Solver<'ctx>,
@@ -1104,6 +1144,11 @@ fn encode_block<'ctx>(
 
                         if let Some(result) = encoded {
                             process_alloc_side_effects(value, ctx, solver, encoding);
+                            if let Some(ty) = encoding.var_types.get(name) {
+                                if !prove_binding_range(ctx, solver, &result, name, ty) {
+                                    encoding.failures.push(format!("Assignment range not proven for '{}'", name));
+                                }
+                            }
 
                             let ssa_var = encoding.fresh_bv(ctx, &format!("{}_ssa", name));
 
@@ -1159,6 +1204,11 @@ fn encode_block<'ctx>(
                     {
                         if type_is_signed(&binding_ty) {
                             encoding.signed_vars.insert(name.clone());
+                        } else {
+                            encoding.signed_vars.remove(name);
+                        }
+                        if !prove_binding_range(ctx, solver, &z3_val, name, &binding_ty) {
+                            encoding.failures.push(format!("Local binding range not proven for '{}'", name));
                         }
                         inject_constraints_for_var(
                             ctx,
@@ -1458,6 +1508,11 @@ fn encode_block<'ctx>(
                     solver.assert(&ghost_var._eq(&z3_val));
                     if type_is_signed(ty) {
                         encoding.signed_vars.insert(name.clone());
+                    } else {
+                        encoding.signed_vars.remove(name);
+                    }
+                    if !prove_binding_range(ctx, solver, &z3_val, name, ty) {
+                        encoding.failures.push(format!("Ghost binding range not proven for '{}'", name));
                     }
                     inject_constraints_for_var(
                         ctx,
@@ -1532,6 +1587,11 @@ fn encode_block<'ctx>(
                     expr_to_z3(ctx, expr, &encoding.current_vars, &encoding.signed_vars);
                 process_alloc_side_effects(expr, ctx, solver, encoding);
                 if let Some(z3_val) = z3_val_opt {
+                    if let Some(ty) = encoding.var_types.get("result") {
+                        if !prove_binding_range(ctx, solver, &z3_val, "result", ty) {
+                            encoding.failures.push("Return value range not proven".to_string());
+                        }
+                    }
                     encoding.current_vars.insert("result".to_string(), z3_val);
                     encoding.modified.insert("result".to_string());
                 } else {
