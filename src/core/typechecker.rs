@@ -392,7 +392,10 @@ fn check_block(block: &Block, env: &mut TypeEnv, fn_name: &str, expected_return:
                     env.register_constraints(name, inferred);
                 } else {
                     env.errors.push(TypeError {
-                        message: format!("Cannot infer type of binding '{}'; explicit supported type required", name),
+                        message: format!(
+                            "Cannot infer type of binding '{}'; explicit supported type required",
+                            name
+                        ),
                         location: fn_name.to_string(),
                     });
                 }

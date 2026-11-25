@@ -119,12 +119,21 @@ pub fn cmd_build(file: &Path, output: &Path, target: &str, timeout_ms: u64) {
             std::process::exit(1);
         }
     }
-    emit_cortex_manifest(file, &source, rust_code.as_bytes(), output, timeout_ms, &results);
+    emit_cortex_manifest(
+        file,
+        &source,
+        rust_code.as_bytes(),
+        output,
+        timeout_ms,
+        &results,
+    );
 }
 
 pub(crate) fn unsupported_build_feature(program: &Program, target: &str) -> Option<&'static str> {
     if target != "rust" {
-        return Some("LLVM and silicon outputs are quarantined pending differential execution validation");
+        return Some(
+            "LLVM and silicon outputs are quarantined pending differential execution validation",
+        );
     }
     if program.items.iter().any(item_uses_u256_or_big_literal) {
         return Some(match target {

@@ -39,7 +39,12 @@ pub async fn get_provenance(
         metric_id: event.metric_id,
         value: event.metric_value,
         provenance: ProvenanceInfo {
-            level: if observed { "OBSERVED_UNATTESTED" } else { "LEGACY_UNATTESTED" }.to_string(),
+            level: if observed {
+                "OBSERVED_UNATTESTED"
+            } else {
+                "LEGACY_UNATTESTED"
+            }
+            .to_string(),
             source: ProvenanceSource {
                 registry_id: event.source_type,
             },

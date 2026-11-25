@@ -126,31 +126,66 @@ mod omega_tests {
         let options = SqliteConnectOptions::new()
             .filename(directory.path().join("ledger.db"))
             .create_if_missing(true);
-        let pool = SqlitePoolOptions::new().max_connections(1)
-            .connect_with(options.clone()).await.unwrap();
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options.clone())
+            .await
+            .unwrap();
         initialize_ledger_table(&pool).await.unwrap();
-        append_ledger_event(&pool, "test".into(), 1.0, None, "test".into(),
-            "source".into(), "test".into(), "output".into()).await.unwrap();
+        append_ledger_event(
+            &pool,
+            "test".into(),
+            1.0,
+            None,
+            "test".into(),
+            "source".into(),
+            "test".into(),
+            "output".into(),
+        )
+        .await
+        .unwrap();
         pool.close().await;
-        let reopened = SqlitePoolOptions::new().max_connections(1)
-            .connect_with(options).await.unwrap();
+        let reopened = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .unwrap();
         initialize_ledger_table(&reopened).await.unwrap();
         assert!(get_ledger_event(&reopened, "test").await.unwrap().is_some());
-        assert!(sqlx::query("UPDATE traceability_ledger SET metric_value = 2").execute(&reopened).await.is_err());
-        assert!(sqlx::query("DELETE FROM traceability_ledger").execute(&reopened).await.is_err());
+        assert!(
+            sqlx::query("UPDATE traceability_ledger SET metric_value = 2")
+                .execute(&reopened)
+                .await
+                .is_err()
+        );
+        assert!(
+            sqlx::query("DELETE FROM traceability_ledger")
+                .execute(&reopened)
+                .await
+                .is_err()
+        );
         for recursive in [0, 1] {
             sqlx::query(&format!("PRAGMA recursive_triggers={recursive}"))
                 .execute(&reopened)
                 .await
                 .unwrap();
-            assert!(sqlx::query(
-                "INSERT OR REPLACE INTO traceability_ledger
+            assert!(
+                sqlx::query(
+                    "INSERT OR REPLACE INTO traceability_ledger
                  SELECT event_id, metric_id, 9, parent_event_id, source_type,
                         source_hash, transformation, output_hash, timestamp
                  FROM traceability_ledger"
-            ).execute(&reopened).await.is_err());
+                )
+                .execute(&reopened)
+                .await
+                .is_err()
+            );
             assert_eq!(
-                get_ledger_event(&reopened, "test").await.unwrap().unwrap().metric_value,
+                get_ledger_event(&reopened, "test")
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .metric_value,
                 1.0
             );
         }

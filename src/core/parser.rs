@@ -398,7 +398,9 @@ fn parse_invariant_expr(pair: pest::iterators::Pair<Rule>) -> Result<InvariantEx
                 });
             }
             if inners.len() != 3 {
-                return Err("Chained invariant comparisons require explicit conjunctions".to_string());
+                return Err(
+                    "Chained invariant comparisons require explicit conjunctions".to_string(),
+                );
             }
             // left op right
             let left = parse_inv_additive(inners.remove(0))?;
@@ -874,26 +876,41 @@ fn binary_precedence(op: &BinOp) -> u8 {
 }
 
 fn reduce_binary(values: &mut Vec<Expr>, operators: &mut Vec<BinOp>) -> Result<(), String> {
-    let op = operators.pop().ok_or_else(|| "Missing binary operator".to_string())?;
-    let right = values.pop().ok_or_else(|| "Missing right operand".to_string())?;
-    let left = values.pop().ok_or_else(|| "Missing left operand".to_string())?;
-    values.push(Expr::BinOp { left: Box::new(left), op, right: Box::new(right) });
+    let op = operators
+        .pop()
+        .ok_or_else(|| "Missing binary operator".to_string())?;
+    let right = values
+        .pop()
+        .ok_or_else(|| "Missing right operand".to_string())?;
+    let left = values
+        .pop()
+        .ok_or_else(|| "Missing left operand".to_string())?;
+    values.push(Expr::BinOp {
+        left: Box::new(left),
+        op,
+        right: Box::new(right),
+    });
     Ok(())
 }
 
 fn parse_expr(pair: pest::iterators::Pair<Rule>) -> Result<Expr, String> {
     let mut inners = pair.into_inner();
-    let first = inners.next().ok_or_else(|| "Expected expression".to_string())?;
+    let first = inners
+        .next()
+        .ok_or_else(|| "Expected expression".to_string())?;
     let mut values = vec![parse_unary(first)?];
     let mut operators = Vec::new();
     while let Some(op_pair) = inners.next() {
         let op = parse_bin_op(op_pair)?;
-        while operators.last().is_some_and(|previous| {
-            binary_precedence(previous) >= binary_precedence(&op)
-        }) {
+        while operators
+            .last()
+            .is_some_and(|previous| binary_precedence(previous) >= binary_precedence(&op))
+        {
             reduce_binary(&mut values, &mut operators)?;
         }
-        let right = inners.next().ok_or_else(|| "Expected right-hand side".to_string())?;
+        let right = inners
+            .next()
+            .ok_or_else(|| "Expected right-hand side".to_string())?;
         operators.push(op);
         values.push(parse_unary(right)?);
     }
@@ -1173,7 +1190,11 @@ mod tests {
     fn omega_parser_precedence_and_tail() {
         let function = omega_function("fn f() -> u64 { 1 + 2 * 3 }");
         match function.body.expr.as_deref() {
-            Some(Expr::BinOp { op: BinOp::Add, right, .. }) => {
+            Some(Expr::BinOp {
+                op: BinOp::Add,
+                right,
+                ..
+            }) => {
                 assert!(matches!(right.as_ref(), Expr::BinOp { op: BinOp::Mul, .. }));
             }
             other => panic!("incorrect expression AST: {:?}", other),
@@ -1184,7 +1205,11 @@ mod tests {
     fn omega_empty_then_retains_else() {
         let function = omega_function("fn f(mut x: u64) { if x > 0 {} else { x = 1; } }");
         match &function.body.stmts[0] {
-            Stmt::If { then_block, else_block: Some(other), .. } => {
+            Stmt::If {
+                then_block,
+                else_block: Some(other),
+                ..
+            } => {
                 assert!(then_block.stmts.is_empty());
                 assert_eq!(other.stmts.len(), 1);
             }
@@ -1196,7 +1221,13 @@ mod tests {
     fn omega_assignment_target_is_not_truncated() {
         assert!(parse_program("fn f() { x.a.b = 1; }").is_err());
         let function = omega_function("fn f() { x[1] = 2; }");
-        assert!(matches!(&function.body.stmts[0], Stmt::Assign { target: LValue::Index { .. }, .. }));
+        assert!(matches!(
+            &function.body.stmts[0],
+            Stmt::Assign {
+                target: LValue::Index { .. },
+                ..
+            }
+        ));
     }
 
     #[test]

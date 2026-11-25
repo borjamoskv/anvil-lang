@@ -163,14 +163,20 @@ fn soundness_subset(block: &Block, root: bool) -> Result<(), &'static str> {
     }
     for (index, stmt) in block.stmts.iter().enumerate() {
         match stmt {
-            Stmt::While { .. } => return Err("Loop verification quarantined pending induction repair"),
+            Stmt::While { .. } => {
+                return Err("Loop verification quarantined pending induction repair");
+            }
             Stmt::Return(_) if !root || index + 1 != block.stmts.len() => {
                 return Err("Early or nested returns require terminating CFG paths");
             }
             Stmt::Let { .. } | Stmt::Ghost { .. } if !root => {
                 return Err("Branch-local bindings require guarded scoped SSA");
             }
-            Stmt::If { then_block, else_block, .. } => {
+            Stmt::If {
+                then_block,
+                else_block,
+                ..
+            } => {
                 soundness_subset(then_block, false)?;
                 if let Some(other) = else_block {
                     soundness_subset(other, false)?;
@@ -187,7 +193,10 @@ fn soundness_subset(block: &Block, root: bool) -> Result<(), &'static str> {
 fn validate_binding_identities(func: &FnDef, state_vars: &[StateVar]) -> Result<(), &'static str> {
     let mut names = HashSet::new();
     names.insert("result");
-    for name in func.params.iter().map(|param| param.name.as_str())
+    for name in func
+        .params
+        .iter()
+        .map(|param| param.name.as_str())
         .chain(state_vars.iter().map(|state| state.name.as_str()))
     {
         if !names.insert(name) {
@@ -219,11 +228,15 @@ fn has_quantifier(expr: &InvariantExpr) -> bool {
 }
 
 pub fn program_function_count(program: &Program) -> usize {
-    program.items.iter().map(|item| match item {
-        Item::Function(_) => 1,
-        Item::Contract(contract) => contract.functions.len(),
-        _ => 0,
-    }).sum()
+    program
+        .items
+        .iter()
+        .map(|item| match item {
+            Item::Function(_) => 1,
+            Item::Contract(contract) => contract.functions.len(),
+            _ => 0,
+        })
+        .sum()
 }
 
 pub fn verification_succeeded(results: &[VerifyResult], function_count: usize) -> bool {
@@ -251,18 +264,47 @@ fn verify_function(
     if let Err(reason) = validate_binding_identities(func, state_vars) {
         return unverified_result(func, 0, 0, start, reason);
     }
-    if func.assumes.iter().any(|inv| invariant_uses_post(&inv.expr)) {
-        return unverified_result(func, 0, 0, start, "Assumptions may constrain only the entry state");
+    if func
+        .assumes
+        .iter()
+        .any(|inv| invariant_uses_post(&inv.expr))
+    {
+        return unverified_result(
+            func,
+            0,
+            0,
+            start,
+            "Assumptions may constrain only the entry state",
+        );
     }
-    if func.invariants.iter().chain(func.assumes.iter()).chain(contract_invariants.iter())
+    if func
+        .invariants
+        .iter()
+        .chain(func.assumes.iter())
+        .chain(contract_invariants.iter())
         .any(|inv| has_quantifier(&inv.expr))
     {
-        return unverified_result(func, 0, 0, start, "Quantified invariants require capture-free scoped encoding");
+        return unverified_result(
+            func,
+            0,
+            0,
+            start,
+            "Quantified invariants require capture-free scoped encoding",
+        );
     }
-    if func.return_type.as_ref().is_some_and(|ty| *ty != Type::Unit)
+    if func
+        .return_type
+        .as_ref()
+        .is_some_and(|ty| *ty != Type::Unit)
         && !matches!(func.body.stmts.last(), Some(Stmt::Return(Some(_))))
     {
-        return unverified_result(func, 0, 0, start, "Non-unit result requires a terminating return");
+        return unverified_result(
+            func,
+            0,
+            0,
+            start,
+            "Non-unit result requires a terminating return",
+        );
     }
 
     let mut cfg = Config::new();
@@ -279,7 +321,11 @@ fn verify_function(
     let mut param_types: HashMap<String, Type> = HashMap::new();
 
     for param in &func.params {
-        let pre = BV::new_const(&ctx, format!("$anvil.pre.{}", param.name).as_str(), SOLVER_BV_WIDTH);
+        let pre = BV::new_const(
+            &ctx,
+            format!("$anvil.pre.{}", param.name).as_str(),
+            SOLVER_BV_WIDTH,
+        );
         let post = BV::new_const(
             &ctx,
             format!("$anvil.post.{}", param.name).as_str(),
@@ -299,8 +345,16 @@ fn verify_function(
 
     // Populate state variables
     for var in state_vars {
-        let pre = BV::new_const(&ctx, format!("$anvil.pre.{}", var.name).as_str(), SOLVER_BV_WIDTH);
-        let post = BV::new_const(&ctx, format!("$anvil.post.{}", var.name).as_str(), SOLVER_BV_WIDTH);
+        let pre = BV::new_const(
+            &ctx,
+            format!("$anvil.pre.{}", var.name).as_str(),
+            SOLVER_BV_WIDTH,
+        );
+        let post = BV::new_const(
+            &ctx,
+            format!("$anvil.post.{}", var.name).as_str(),
+            SOLVER_BV_WIDTH,
+        );
         pre_vars.insert(var.name.clone(), pre);
         post_vars.insert(var.name.clone(), post);
         param_types.insert(var.name.clone(), var.ty.clone());
@@ -1065,11 +1119,15 @@ fn prove_binding_range<'ctx>(
         match constraint.kind {
             ConstraintKind::NonNegative => bounds.push(value.bvuge(&zero)),
             ConstraintKind::UpperBound { bits } if bits < SOLVER_BV_WIDTH => {
-                let Some(upper) = bv_pow2(ctx, bits) else { return false; };
+                let Some(upper) = bv_pow2(ctx, bits) else {
+                    return false;
+                };
                 bounds.push(value.bvult(&upper));
             }
             ConstraintKind::SignedBound { bits } if bits < SOLVER_BV_WIDTH => {
-                let Some(upper) = bv_pow2(ctx, bits - 1) else { return false; };
+                let Some(upper) = bv_pow2(ctx, bits - 1) else {
+                    return false;
+                };
                 bounds.push(value.bvsge(&zero.bvsub(&upper)));
                 bounds.push(value.bvslt(&upper));
             }
@@ -1193,7 +1251,10 @@ fn encode_block<'ctx>(
                             process_alloc_side_effects(value, ctx, solver, encoding);
                             if let Some(ty) = encoding.var_types.get(name) {
                                 if !prove_binding_range(ctx, solver, &result, name, ty) {
-                                    encoding.failures.push(format!("Assignment range not proven for '{}'", name));
+                                    encoding.failures.push(format!(
+                                        "Assignment range not proven for '{}'",
+                                        name
+                                    ));
                                 }
                             }
 
@@ -1255,7 +1316,9 @@ fn encode_block<'ctx>(
                             encoding.signed_vars.remove(name);
                         }
                         if !prove_binding_range(ctx, solver, &z3_val, name, &binding_ty) {
-                            encoding.failures.push(format!("Local binding range not proven for '{}'", name));
+                            encoding
+                                .failures
+                                .push(format!("Local binding range not proven for '{}'", name));
                         }
                         inject_constraints_for_var(
                             ctx,
@@ -1559,7 +1622,9 @@ fn encode_block<'ctx>(
                         encoding.signed_vars.remove(name);
                     }
                     if !prove_binding_range(ctx, solver, &z3_val, name, ty) {
-                        encoding.failures.push(format!("Ghost binding range not proven for '{}'", name));
+                        encoding
+                            .failures
+                            .push(format!("Ghost binding range not proven for '{}'", name));
                     }
                     inject_constraints_for_var(
                         ctx,
@@ -1636,7 +1701,9 @@ fn encode_block<'ctx>(
                 if let Some(z3_val) = z3_val_opt {
                     if let Some(ty) = encoding.var_types.get("result") {
                         if !prove_binding_range(ctx, solver, &z3_val, "result", ty) {
-                            encoding.failures.push("Return value range not proven".to_string());
+                            encoding
+                                .failures
+                                .push("Return value range not proven".to_string());
                         }
                     }
                     encoding.current_vars.insert("result".to_string(), z3_val);

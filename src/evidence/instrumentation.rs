@@ -20,7 +20,9 @@ pub fn start_instrumentation_loop(pool: SqlitePool) {
                 digest.clone(),
                 "uptime_monitor".to_string(),
                 digest,
-            ).await {
+            )
+            .await
+            {
                 tracing::warn!(%error, "Unable to append runtime observation");
             }
         }
