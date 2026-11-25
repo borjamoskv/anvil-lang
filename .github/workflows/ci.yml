@@ -250,6 +250,8 @@ jobs:
       with:
         persist-credentials: false
         fetch-depth: 1
+    - name: Operational containment negative controls
+      run: python3 -m unittest discover -s tests -p test_omega_operational_containment.py -v
     - name: SDK negative controls
       run: node --test agents-archi-mvp/sdk-ts/canonical_trace.test.mjs
     - name: Install native dependencies

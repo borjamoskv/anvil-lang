@@ -206,7 +206,7 @@ def build_resilient_session() -> requests.Session:
         total=5,
         backoff_factor=2,
         status_forcelist=[408, 429, 500, 502, 503, 504],
-        allowed_methods=["POST", "PUT", "GET", "HEAD"]
+        allowed_methods=["GET", "HEAD"]
     )
     
     adapter = HTTPAdapter(max_retries=retry_strategy)
@@ -229,54 +229,14 @@ def build_resilient_session() -> requests.Session:
     return session
 
 def submit_vulnerability_report(
-    endpoint_url: str, 
-    report_content: str, 
-    cortex_taint: str, 
+    endpoint_url: str,
+    report_content: str,
+    cortex_taint: str,
     blake3_hash: str,
-    dry_run: bool = False
+    dry_run: bool = False,
 ) -> dict | None:
-    """Envía el reporte asegurando el empaquetado del payload criptográfico."""
-    session = build_resilient_session()
-
-    if dry_run:
-        logger.info(f"[DRY-RUN] Verificando conectividad hacia {endpoint_url}...")
-        try:
-            # Ping simple para validar salida a internet usando la sesión con proxy
-            session.head(endpoint_url, timeout=10)
-            logger.info("[DRY-RUN] Network OK. Salida a red desbloqueada.")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"[DRY-RUN] Fricción de red detectada: {e}")
-            raise
-        return None
-    
-    payload = {
-        "report_content": report_content,
-        "hash": blake3_hash,
-        "cortex_taint": cortex_taint
-    }
-    
-    headers = {
-        "Content-Type": "application/json",
-        "User-Agent": "CORTEX-Ouroboros-Client/1.0"
-    }
-    
-    try:
-        response = session.post(
-            endpoint_url, 
-            json=payload, 
-            headers=headers, 
-            timeout=(10, 30)
-        )
-        response.raise_for_status()
-        logger.info(f"Report submitted successfully. Status: {response.status_code}")
-        return {"status": response.status_code, "text": response.text[:200]}
-    except requests.exceptions.ProxyError as e:
-        logger.error(f"[NETWORK SAGA ABORT] Fallo en la delegación del proxy: {e}")
-        raise
-    except requests.exceptions.RequestException as e:
-        logger.error(f"[NETWORK SAGA ABORT] Fallo en transporte HTTP después de reintentos: {e}")
-        raise
-
+    """Quarantined: even a connectivity check is an external request."""
+    raise RuntimeError("OMEGA-21: remote submissions disabled; manual review required.")
 
 
 def generate_cortex_taint(report_path: str) -> str:
@@ -457,7 +417,9 @@ def cmd_status() -> None:
 
 
 def cmd_prepare(target_id: str, inject: bool = False, submit: bool = False, dry_run: bool = False) -> None:
-    """Full strike preparation pipeline."""
+    """Prepare a local report without automated delivery."""
+    if submit or dry_run:
+        raise SystemExit("OMEGA-21: --submit and network --dry-run disabled.")
     if target_id not in TARGETS:
         print(f"❌ Unknown target ID: {target_id}")
         print("   Run: python3 ouroboros_auto_submit.py list")
@@ -592,13 +554,14 @@ def cmd_prepare(target_id: str, inject: bool = False, submit: bool = False, dry_
 
 def main() -> None:
     args = sys.argv[1:]
+    if "--submit" in args or "--dry-run" in args:
+        raise SystemExit("OMEGA-21: remote submission and network probes disabled.")
 
     if not args:
         print("Usage:")
         print("  python3 ouroboros_auto_submit.py <ID>          # Prepare strike")
         print("  python3 ouroboros_auto_submit.py <ID> --inject # Prepare + clipboard")
-        print("  python3 ouroboros_auto_submit.py <ID> --submit # Submit via API")
-        print("  python3 ouroboros_auto_submit.py <ID> --dry-run# Test API network")
+        print("  Remote delivery disabled; use manual review.")
         print("  python3 ouroboros_auto_submit.py list          # Show targets")
         print("  python3 ouroboros_auto_submit.py status        # Ledger summary")
         return

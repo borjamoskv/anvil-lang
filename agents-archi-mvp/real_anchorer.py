@@ -5,7 +5,7 @@ from eth_account import Account
 
 # [Ω] C5-REAL Configuration
 RPC_URL = os.getenv("ARCHI_RPC_URL", "http://127.0.0.1:8545")
-PRIVATE_KEY = os.getenv("ARCHI_PRIVATE_KEY", "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80") # Default Anvil Account 0
+PRIVATE_KEY = os.getenv("ARCHI_PRIVATE_KEY")
 
 # Load dynamic contract address from deployment config if exists
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,7 +20,7 @@ if not CONTRACT_ADDRESS:
                 cfg = json.load(f)
                 CONTRACT_ADDRESS = cfg.get("contract_address", DEFAULT_ADDRESS)
                 print(f"[Ω] Loaded deployed contract address: {CONTRACT_ADDRESS}")
-        except (requests.RequestException, OSError, ValueError):
+        except (OSError, ValueError):
             CONTRACT_ADDRESS = DEFAULT_ADDRESS
     else:
         CONTRACT_ADDRESS = DEFAULT_ADDRESS
@@ -48,6 +48,9 @@ ABI = [
 
 class RealAnchorer:
     def __init__(self):
+        self.account = None
+        if not PRIVATE_KEY:
+            raise RuntimeError("ARCHI_PRIVATE_KEY must be explicitly configured")
         self.w3 = Web3(Web3.HTTPProvider(RPC_URL))
         if not self.w3.is_connected():
             print(f"[!] Critical Error: Could not connect to RPC at {RPC_URL}")

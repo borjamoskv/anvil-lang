@@ -22,11 +22,14 @@ CHECK_INTERVAL_SECONDS = 60  # Check every 60 seconds
 SEEN_IDS_FILE = os.path.expanduser("~/.cortex_mail_sentinel_seen.txt")
 
 def notify_macos(title: str, message: str):
-    """Send a native macOS notification."""
-    subprocess.run([
-        "osascript", "-e",
-        f'display notification "{message}" with title "{title}" sound name "Glass"'
-    ])
+    """Pass untrusted notification text as data, never AppleScript source."""
+    script = (
+        "on run argv\n"
+        '    display notification (item 2 of argv) with title (item 1 of argv) sound name "Glass"\n'
+        "end run"
+    )
+    subprocess.run(["osascript", "-e", script, "--", title, message],
+                   check=True, timeout=15)
 
 def say_macos(text: str):
     """Speak notification aloud."""

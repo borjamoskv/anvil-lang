@@ -1,6 +1,6 @@
 # anvil-lang
 
-> **Remediation candidate, not certified.** Source checking is not an independent proof certificate or execution attestation. Loop verification, early/nested returns, tail-expression verification, branch-local bindings, quantified invariants, ambiguous bindings, and LLVM/silicon builds are temporarily disabled in the verification/build paths pending soundness work.
+> **Remediation candidate, not certified.** Automated email replies, remote report delivery, legacy Python proof issuance, trace writes/automatic anchoring, and synthetic registry generation are quarantined. Manual operational review is required. Source checking is not an independent proof certificate or execution attestation. Loop verification, early/nested returns, tail-expression verification, branch-local bindings, quantified invariants, ambiguous bindings, and LLVM/silicon builds are temporarily disabled in the verification/build paths pending soundness work.
 
 > **Formally Verified Domain-Specific Systems Language & Runtime with Z3 SMT and Lean 4 Proof Guarantees.**
 

@@ -5,7 +5,7 @@ Reality levels:
   - C5-REAL: Connected to Anvil/L2, traces anchored on-chain
   - C4-SIMULACIÓN: No RPC, traces stored off-chain only
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import Dict, Any, Optional
 import json
@@ -19,20 +19,8 @@ sys.path.insert(
     0, os.path.join(os.path.dirname(__file__), "..")
 )
 
-# Lazy-load the anchorer at startup
+# No RPC or signer initialization during import while writes are quarantined.
 anchorer = None
-try:
-    from real_anchorer import RealAnchorer
-    _inst = RealAnchorer()
-    if _inst.account:
-        anchorer = _inst
-        logging.info("[C5-REAL] RealAnchorer connected")
-    else:
-        logging.warning(
-            "[C4-SIM] RealAnchorer init but no RPC"
-        )
-except (requests.RequestException, OSError, ValueError) as exc:
-    logging.warning(f"[C4-SIM] Anchorer unavailable: {exc}")
 
 app = FastAPI(
     title="Archi Agent Verification Gateway",
@@ -41,10 +29,10 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=[],
+    allow_credentials=False,
+    allow_methods=["GET"],
+    allow_headers=[],
 )
 
 BASE_DIR = os.path.join(os.path.dirname(__file__), "..")
@@ -75,76 +63,15 @@ def load_registry():
             data.setdefault("feed", [])
             data.setdefault("leaderboard", [])
             return data
-    except (requests.RequestException, OSError, ValueError):
-        return {
-            "traces": [],
-            "leaderboard": [],
-            "feed": [],
-        }
-
-
-def save_registry(data):
-    with open(REGISTRY_PATH, "w") as f:
-        json.dump(data, f, indent=4)
-
-
-def try_anchor_onchain(
-    trace_hash: str, agent_id: str, domain: str
-) -> Optional[str]:
-    """Attempt C5-REAL on-chain anchoring. Returns tx hash
-    or None on failure/unavailability."""
-    if not anchorer:
-        return None
-    try:
-        tx_hash = anchorer.anchor(
-            trace_hash, agent_id, domain
-        )
-        return tx_hash
-    except (requests.RequestException, OSError, ValueError) as exc:
-        logging.error(f"[!] On-chain anchor failed: {exc}")
-        return None
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=503, detail="Registry unavailable") from exc
 
 
 @app.post("/api/v1/traces")
 async def submit_trace(payload: TracePayload):
-    """
-    Receive an Archi-Trace-Hash from a remote agent.
-    1. Store in local registry
-    2. Attempt on-chain anchor (if RPC available)
-    """
-    registry = load_registry()
-
-    # Attempt on-chain anchoring
-    onchain_tx = try_anchor_onchain(
-        payload.trace_hash,
-        payload.agent_id,
-        payload.domain,
-    )
-
-    reality = "C5-REAL" if onchain_tx else "C4-SIMULACIÓN"
-
-    trace_entry = {
-        "agent_id": payload.agent_id,
-        "session_id": payload.session_id,
-        "domain": payload.domain,
-        "timestamp": payload.timestamp,
-        "trace_hash": payload.trace_hash,
-        "state": payload.state,
-        "onchain_tx": onchain_tx,
-        "reality_level": reality,
-        "metadata": payload.metadata,
-    }
-
-    registry["traces"].insert(0, trace_entry)
-    save_registry(registry)
-
-    return {
-        "status": "success",
-        "message": f"Trace registered ({reality})",
-        "trace_hash": payload.trace_hash,
-        "onchain_tx": onchain_tx,
-        "reality_level": reality,
-    }
+    # No writes or on-chain effects before authenticated ingestion and
+    # persistence have an independently verified protocol.
+    raise HTTPException(status_code=503, detail="OMEGA-21: trace writes and anchoring quarantined")
 
 
 @app.get("/api/v1/traces")
@@ -162,9 +89,8 @@ async def get_registry():
 
 @app.get("/api/v1/health")
 async def health_check():
-    mode = "C5-REAL" if anchorer else "C4-SIMULACIÓN"
     return {
-        "status": mode,
+        "status": "READ_ONLY_QUARANTINE",
         "engine": "Archi Gateway V2",
-        "onchain_ready": anchorer is not None,
+        "onchain_ready": False,
     }
