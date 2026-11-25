@@ -119,8 +119,10 @@ for target in targets:
     
     # We pass the env vars explicitly to subprocess
     env = os.environ.copy()
-    env["P2P_SMTP_USER"] = "borjamoskv@gmail.com"
-    env["P2P_SMTP_PASSWORD"] = "sqkp kvax zait aboz".replace(" ", "")
+    if not env.get("P2P_SMTP_USER"):
+        raise SystemExit("Missing required environment variable: P2P_SMTP_USER")
+    if not env.get("P2P_SMTP_PASSWORD"):
+        raise SystemExit("Missing required environment variable: P2P_SMTP_PASSWORD")
     
     print(f"Sending via API to {target}...")
     result = subprocess.run(["python3", script_path, payload], env=env, capture_output=True, text=True)
