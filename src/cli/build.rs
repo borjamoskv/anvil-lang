@@ -4,7 +4,7 @@ use tracing::{error, info, info_span};
 
 use crate::core::ast::{Block, Expr, Item, Program, Stmt, Type};
 use crate::core::{parser, typechecker};
-use crate::engine::{codegen, llvm_ir, verifier};
+use crate::engine::{codegen, verifier};
 
 pub fn cmd_build(file: &Path, output: &Path, target: &str, timeout_ms: u64) {
     let _span =
@@ -106,115 +106,20 @@ pub fn cmd_build(file: &Path, output: &Path, target: &str, timeout_ms: u64) {
         std::process::exit(1);
     }
 
-    if target == "llvm" {
-        eprintln!("  {} Generating LLVM IR...", "→".bright_blue());
-        let llvm_ir = llvm_ir::generate_llvm_ir(&program);
-        let out_path = output.with_extension("ll");
-        match std::fs::write(&out_path, &llvm_ir) {
-            Ok(_) => {
-                info!(path = %out_path.display(), bytes = llvm_ir.len(), "LLVM IR generated");
-                eprintln!(
-                    "  {} Generated {} ({} bytes)",
-                    "✓".bright_green(),
-                    out_path.display(),
-                    llvm_ir.len()
-                );
-            }
-            Err(e) => {
-                error!(path = %out_path.display(), error = %e, "Cannot write LLVM IR");
-                eprintln!(
-                    "  {} Cannot write {}: {}",
-                    "✗".bright_red(),
-                    out_path.display(),
-                    e
-                );
-                std::process::exit(1);
-            }
+    eprintln!("  {} Generating Rust...", "→".bright_blue());
+    let rust_code = codegen::generate_rust(&program);
+    let out_path = output.with_extension("rs");
+    match std::fs::write(&out_path, rust_code.as_bytes()) {
+        Ok(_) => {
+            info!(path = %out_path.display(), bytes = rust_code.len(), "Rust source generated");
+            eprintln!("  {} Generated {}", "✓".bright_green(), out_path.display());
         }
-    } else if target == "silicon" {
-        eprintln!(
-            "  {} Generating RTL Verilog & ASIC Bitstream...",
-            "→".bright_blue()
-        );
-        let compiler = crate::singularity::DirectSiliconCompiler::default();
-        match compiler.compile_to_bitstream(&program) {
-            Ok(bitstream) => {
-                let out_path = output.with_extension("bin");
-                match std::fs::write(&out_path, &bitstream) {
-                    Ok(_) => {
-                        info!(path = %out_path.display(), bytes = bitstream.len(), "Direct silicon bitstream generated");
-                        eprintln!(
-                            "  {} Generated {} ({} bytes)",
-                            "✓".bright_green(),
-                            out_path.display(),
-                            bitstream.len()
-                        );
-                    }
-                    Err(e) => {
-                        error!(path = %out_path.display(), error = %e, "Cannot write bitstream");
-                        eprintln!(
-                            "  {} Cannot write {}: {}",
-                            "✗".bright_red(),
-                            out_path.display(),
-                            e
-                        );
-                        std::process::exit(1);
-                    }
-                }
-
-                // Also output the synthesized Verilog code for direct inspection/validation
-                let verilog = crate::singularity::synthesize_ast_to_verilog(&program);
-                let verilog_path = output.with_extension("v");
-                if let Err(e) = std::fs::write(&verilog_path, &verilog) {
-                    error!(path = %verilog_path.display(), error = %e, "Cannot write RTL Verilog");
-                } else {
-                    eprintln!(
-                        "  {} Generated RTL Verilog {} ({} bytes)",
-                        "✓".bright_green(),
-                        verilog_path.display(),
-                        verilog.len()
-                    );
-                }
-            }
-            Err(e) => {
-                error!(error = %e, "ASIC/FPGA fabric synthesis failed");
-                eprintln!(
-                    "  {} ASIC/FPGA fabric synthesis failed: {}",
-                    "✗".bright_red(),
-                    e
-                );
-                std::process::exit(1);
-            }
-        }
-    } else {
-        eprintln!("  {} Generating Rust...", "→".bright_blue());
-        let rust_code = codegen::generate_rust(&program);
-        let out_path = output.with_extension("rs");
-        match std::fs::write(&out_path, &rust_code) {
-            Ok(_) => {
-                info!(path = %out_path.display(), bytes = rust_code.len(), "Rust code generated");
-                eprintln!(
-                    "  {} Generated {} ({} bytes)",
-                    "✓".bright_green(),
-                    out_path.display(),
-                    rust_code.len()
-                );
-            }
-            Err(e) => {
-                error!(path = %out_path.display(), error = %e, "Cannot write Rust code");
-                eprintln!(
-                    "  {} Cannot write {}: {}",
-                    "✗".bright_red(),
-                    out_path.display(),
-                    e
-                );
-                std::process::exit(1);
-            }
+        Err(error) => {
+            eprintln!("Cannot write Rust source: {}", error);
+            std::process::exit(1);
         }
     }
-
-    // ── CORTEX Provenance Manifest ───────────────────────────────────
-    emit_cortex_manifest(file, &source, output, timeout_ms, &results);
+    emit_cortex_manifest(file, &source, rust_code.as_bytes(), output, timeout_ms, &results);
 }
 
 pub(crate) fn unsupported_build_feature(program: &Program, target: &str) -> Option<&'static str> {
@@ -412,6 +317,7 @@ fn expr_uses_address_literal(expr: &Expr) -> bool {
 fn emit_cortex_manifest(
     source_file: &Path,
     source: &str,
+    artifact: &[u8],
     output: &Path,
     timeout_ms: u64,
     results: &[verifier::VerifyResult],
@@ -435,15 +341,10 @@ fn emit_cortex_manifest(
         .collect();
 
     use sha2::{Digest, Sha256};
-    let artifact_path = output.with_extension("rs");
-    let artifact = std::fs::read(&artifact_path).unwrap_or_else(|error| {
-        eprintln!("Cannot bind generated artifact: {}", error);
-        std::process::exit(1);
-    });
     let manifest = serde_json::json!({
         "schema_version": "2.0",
         "source_sha256": hex::encode(Sha256::digest(source.as_bytes())),
-        "artifact_sha256": hex::encode(Sha256::digest(&artifact)),
+        "artifact_sha256": hex::encode(Sha256::digest(artifact)),
         "artifact_kind": "rust_source",
         "independent_certificate": false,
         "execution_attested": false,

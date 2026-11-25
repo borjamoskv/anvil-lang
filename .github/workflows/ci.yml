@@ -2,7 +2,7 @@ name: Anvil CI
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "main", "remediation/omega21-phase2" ]
   pull_request:
     branches: [ "main" ]
   workflow_dispatch:
@@ -238,3 +238,32 @@ jobs:
       run: |
         export PATH="$HOME/.elan/bin:$PATH"
         python3 -m unittest tests/test_lean_kernel_soundness.py tests/test_moloch_landauer_gate.py
+
+
+  omega-candidate:
+    name: OMEGA candidate regressions (not certification)
+    if: github.ref == 'refs/heads/remediation/omega21-phase2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+        fetch-depth: 1
+    - name: SDK negative controls
+      run: node --test agents-archi-mvp/sdk-ts/canonical_trace.test.mjs
+    - name: Install native dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y z3 libz3-dev clang llvm libsqlite3-dev
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        components: rustfmt
+    - name: Real parser and ledger unit regressions
+      run: cargo test --bin anvil omega_ -- --test-threads=1
+    - name: Real compiler integration regressions
+      run: cargo test --test integration_tests soundness_omega_ -- --test-threads=1
+    - name: Proof Market report validation
+      run: cargo test --manifest-path services/proof-market/Cargo.toml structured_success_requires_full_check_report
+    - name: Sovereign compiler (locked)
+      run: cargo test --locked --manifest-path crates/sovereign-compiler/Cargo.toml

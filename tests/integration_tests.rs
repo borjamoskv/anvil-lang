@@ -2083,3 +2083,59 @@ fn f(x: u64) -> u64 where { result' == x }
     }
     let _ = std::fs::remove_file(&path);
 }
+
+// These regressions must execute the actual CLI, with a positive control.
+#[test]
+fn soundness_omega_source_and_post_identity_do_not_alias() {
+    omega_expect_rejection("omega_symbol_collision", r#"
+fn f(x: u64, x_post: u64) -> u64
+    where { x_post == 1, x' == 1 }
+{
+    return x;
+}
+"#);
+    let path = temp_anvil_source("omega_symbol_positive", r#"
+fn f(x: u64, x_post: u64) -> u64
+    where { x == 2, x_post == 1, x' == 2, result' == 2 }
+{
+    return x;
+}
+"#);
+    let (success, json, stdout, stderr) = run_anvil_check_json_path(&path);
+    let _ = std::fs::remove_file(&path);
+    assert!(success, "valid identity-separated source: {}\n{}\n{}", json, stdout, stderr);
+    assert_eq!(json["status"], "VERIFIED");
+}
+
+#[test]
+fn soundness_omega_post_state_assumptions_fail_closed() {
+    omega_expect_rejection("omega_post_assume", r#"
+fn f(x: u64) -> u64
+    assumes { result' == 1 }
+    where { result' == 1 }
+{
+    return x;
+}
+"#);
+}
+
+#[test]
+fn soundness_omega_duplicate_bindings_fail_closed() {
+    omega_expect_rejection("omega_binding_collision", r#"
+fn f(x: u64, x: u64) -> u64
+    where { result' == 1 }
+{
+    return x;
+}
+"#);
+}
+
+#[test]
+fn soundness_omega_missing_return_fails_closed() {
+    omega_expect_rejection("omega_missing_return", r#"
+fn f(x: u64) -> u64
+    where { result' >= 0 }
+{
+}
+"#);
+}

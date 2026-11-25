@@ -182,6 +182,42 @@ fn soundness_subset(block: &Block, root: bool) -> Result<(), &'static str> {
     Ok(())
 }
 
+// Source identifiers are not solver identities. Until scoped SSA supports
+// shadowing, reject rebinding rather than conflating source-level storage.
+fn validate_binding_identities(func: &FnDef, state_vars: &[StateVar]) -> Result<(), &'static str> {
+    let mut names = HashSet::new();
+    names.insert("result");
+    for name in func.params.iter().map(|param| param.name.as_str())
+        .chain(state_vars.iter().map(|state| state.name.as_str()))
+    {
+        if !names.insert(name) {
+            return Err("Duplicate or reserved source binding");
+        }
+    }
+    for stmt in &func.body.stmts {
+        match stmt {
+            Stmt::Let { name, .. } | Stmt::Ghost { name, .. } => {
+                if !names.insert(name.as_str()) {
+                    return Err("Rebinding requires scoped SSA; quarantined");
+                }
+            }
+            _ => {}
+        }
+    }
+    Ok(())
+}
+
+fn has_quantifier(expr: &InvariantExpr) -> bool {
+    match expr {
+        InvariantExpr::Forall { .. } | InvariantExpr::Exists { .. } => true,
+        InvariantExpr::And(a, b) | InvariantExpr::Or(a, b) => {
+            has_quantifier(a) || has_quantifier(b)
+        }
+        InvariantExpr::Not(inner) => has_quantifier(inner),
+        _ => false,
+    }
+}
+
 pub fn program_function_count(program: &Program) -> usize {
     program.items.iter().map(|item| match item {
         Item::Function(_) => 1,
@@ -212,20 +248,30 @@ fn verify_function(
     if let Err(reason) = soundness_subset(&func.body, true) {
         return unverified_result(func, 0, 0, start, reason);
     }
+    if let Err(reason) = validate_binding_identities(func, state_vars) {
+        return unverified_result(func, 0, 0, start, reason);
+    }
+    if func.assumes.iter().any(|inv| invariant_uses_post(&inv.expr)) {
+        return unverified_result(func, 0, 0, start, "Assumptions may constrain only the entry state");
+    }
+    if func.invariants.iter().chain(func.assumes.iter()).chain(contract_invariants.iter())
+        .any(|inv| has_quantifier(&inv.expr))
+    {
+        return unverified_result(func, 0, 0, start, "Quantified invariants require capture-free scoped encoding");
+    }
+    if func.return_type.as_ref().is_some_and(|ty| *ty != Type::Unit)
+        && !matches!(func.body.stmts.last(), Some(Stmt::Return(Some(_))))
+    {
+        return unverified_result(func, 0, 0, start, "Non-unit result requires a terminating return");
+    }
 
     let mut cfg = Config::new();
     cfg.set_timeout_msec(options.timeout_ms);
     let ctx = Context::new(&cfg);
 
-    // Singularity [1/4]: Tensor-SMT Bypass Hook
-    let _ = crate::singularity::TensorSMTEngine::default().guide_smt_search("verify_function_ctx");
-
     // Tactic 'smt' configured to optimize and handle general solver operations robustly
     let tactic = Tactic::new(&ctx, "smt");
     let solver = tactic.solver();
-
-    // Singularity [4/4]: Inyectar topología de Mempool en la verificación matemática
-    crate::singularity::MempoolAwareZ3::inject_mempool_topology(&solver, &ctx);
 
     // Create pre/post Z3 variables for all params
     let mut pre_vars: HashMap<String, BV> = HashMap::new();
@@ -233,10 +279,10 @@ fn verify_function(
     let mut param_types: HashMap<String, Type> = HashMap::new();
 
     for param in &func.params {
-        let pre = BV::new_const(&ctx, param.name.as_str(), SOLVER_BV_WIDTH);
+        let pre = BV::new_const(&ctx, format!("$anvil.pre.{}", param.name).as_str(), SOLVER_BV_WIDTH);
         let post = BV::new_const(
             &ctx,
-            format!("{}_post", param.name).as_str(),
+            format!("$anvil.post.{}", param.name).as_str(),
             SOLVER_BV_WIDTH,
         );
         pre_vars.insert(param.name.clone(), pre);
@@ -244,7 +290,7 @@ fn verify_function(
         param_types.insert(param.name.clone(), param.ty.clone());
 
         if let Type::Arena(_) = &param.ty {
-            let offset_name = format!("{}_offset", param.name);
+            let offset_name = format!("$anvil.arena.offset.{}", param.name);
             let offset_pre = BV::from_i64(&ctx, 0, SOLVER_BV_WIDTH);
             pre_vars.insert(offset_name.clone(), offset_pre);
             param_types.insert(offset_name, Type::U64);
@@ -253,14 +299,14 @@ fn verify_function(
 
     // Populate state variables
     for var in state_vars {
-        let pre = BV::new_const(&ctx, var.name.as_str(), SOLVER_BV_WIDTH);
-        let post = BV::new_const(&ctx, format!("{}_post", var.name).as_str(), SOLVER_BV_WIDTH);
+        let pre = BV::new_const(&ctx, format!("$anvil.pre.{}", var.name).as_str(), SOLVER_BV_WIDTH);
+        let post = BV::new_const(&ctx, format!("$anvil.post.{}", var.name).as_str(), SOLVER_BV_WIDTH);
         pre_vars.insert(var.name.clone(), pre);
         post_vars.insert(var.name.clone(), post);
         param_types.insert(var.name.clone(), var.ty.clone());
 
         if let Type::Arena(_) = &var.ty {
-            let offset_name = format!("{}_offset", var.name);
+            let offset_name = format!("$anvil.arena.offset.{}", var.name);
             let offset_pre = BV::from_i64(&ctx, 0, SOLVER_BV_WIDTH);
             pre_vars.insert(offset_name.clone(), offset_pre);
             param_types.insert(offset_name, Type::U64);
@@ -270,7 +316,7 @@ fn verify_function(
     // Register function return value in post_vars if it returns a non-unit type
     if let Some(ref ret_ty) = func.return_type {
         if *ret_ty != Type::Unit {
-            let post = BV::new_const(&ctx, "result_post", SOLVER_BV_WIDTH);
+            let post = BV::new_const(&ctx, "$anvil.post.result", SOLVER_BV_WIDTH);
             post_vars.insert("result".to_string(), post);
             param_types.insert("result".to_string(), ret_ty.clone());
         }
@@ -831,6 +877,7 @@ fn type_constraints_for_binding(name: &str, ty: &Type) -> Vec<TypeConstraint> {
         Type::I32 => push_signed_constraint(&mut constraints, name, 32),
         Type::I64 => push_signed_constraint(&mut constraints, name, 64),
         Type::I128 => push_signed_constraint(&mut constraints, name, 128),
+        Type::Bool => push_upper_constraint(&mut constraints, name, 1),
         _ => {}
     }
 
@@ -1181,7 +1228,7 @@ fn encode_block<'ctx>(
                 name, ty, value, ..
             } => {
                 if let Some(Type::Arena(capacity)) = ty {
-                    let offset_name = format!("{}_offset", name);
+                    let offset_name = format!("$anvil.arena.offset.{}", name);
                     let offset_val = BV::from_i64(ctx, 0, SOLVER_BV_WIDTH);
                     encoding.current_vars.insert(offset_name, offset_val);
                     encoding
@@ -1963,7 +2010,7 @@ fn expr_to_z3<'ctx>(
                 Expr::Ident(n) => n.trim().to_string(),
                 _ => return None,
             };
-            let offset_var_name = format!("{}_offset", arena_name);
+            let offset_var_name = format!("$anvil.arena.offset.{}", arena_name);
             vars.get(&offset_var_name).cloned()
         }
         _ => None,
@@ -3241,7 +3288,7 @@ fn process_alloc_side_effects<'ctx>(
             };
             let aligned_size = (size + 7) & !7;
 
-            let offset_var_name = format!("{}_offset", arena_name);
+            let offset_var_name = format!("$anvil.arena.offset.{}", arena_name);
             let current_offset = match encoding.current_vars.get(&offset_var_name).cloned() {
                 Some(val) => val,
                 None => return,

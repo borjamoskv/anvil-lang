@@ -4,7 +4,8 @@ use sqlx::sqlite::SqlitePool;
 use uuid::Uuid;
 
 pub async fn initialize_ledger_table(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    // Production initialization must preserve all existing evidence.
+    // Install schema and append-only guards in one transaction.
+    let mut migration = pool.begin().await?;
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS traceability_ledger (
             event_id TEXT PRIMARY KEY,
@@ -18,21 +19,24 @@ pub async fn initialize_ledger_table(pool: &SqlitePool) -> Result<(), sqlx::Erro
             timestamp TEXT NOT NULL
         )",
     )
-    .execute(pool)
+    .execute(&mut *migration)
     .await?;
 
     sqlx::query(
         "CREATE INDEX IF NOT EXISTS idx_traceability_metric_id ON traceability_ledger (metric_id)",
     )
-    .execute(pool)
+    .execute(&mut *migration)
     .await?;
 
     for statement in [
         "CREATE TRIGGER IF NOT EXISTS traceability_no_update BEFORE UPDATE ON traceability_ledger BEGIN SELECT RAISE(ABORT, 'append-only ledger'); END",
         "CREATE TRIGGER IF NOT EXISTS traceability_no_delete BEFORE DELETE ON traceability_ledger BEGIN SELECT RAISE(ABORT, 'append-only ledger'); END",
+        "CREATE TRIGGER IF NOT EXISTS traceability_no_replace BEFORE INSERT ON traceability_ledger WHEN EXISTS (SELECT 1 FROM traceability_ledger WHERE event_id = NEW.event_id) BEGIN SELECT RAISE(ABORT, 'duplicate ledger event'); END",
+        "CREATE TRIGGER IF NOT EXISTS traceability_valid_id BEFORE INSERT ON traceability_ledger WHEN NEW.event_id IS NULL OR length(trim(NEW.event_id)) = 0 BEGIN SELECT RAISE(ABORT, 'missing ledger event identity'); END",
     ] {
-        sqlx::query(statement).execute(pool).await?;
+        sqlx::query(statement).execute(&mut *migration).await?;
     }
+    migration.commit().await?;
     Ok(())
 }
 
@@ -90,7 +94,7 @@ pub async fn get_ledger_event(
         "SELECT event_id, metric_id, metric_value, parent_event_id, source_type, source_hash, transformation, output_hash, timestamp
         FROM traceability_ledger
         WHERE metric_id = ?
-        ORDER BY timestamp DESC
+        ORDER BY timestamp DESC, event_id DESC
         LIMIT 1"
     )
     .bind(metric_id)
@@ -134,5 +138,21 @@ mod omega_tests {
         assert!(get_ledger_event(&reopened, "test").await.unwrap().is_some());
         assert!(sqlx::query("UPDATE traceability_ledger SET metric_value = 2").execute(&reopened).await.is_err());
         assert!(sqlx::query("DELETE FROM traceability_ledger").execute(&reopened).await.is_err());
+        for recursive in [0, 1] {
+            sqlx::query(&format!("PRAGMA recursive_triggers={recursive}"))
+                .execute(&reopened)
+                .await
+                .unwrap();
+            assert!(sqlx::query(
+                "INSERT OR REPLACE INTO traceability_ledger
+                 SELECT event_id, metric_id, 9, parent_event_id, source_type,
+                        source_hash, transformation, output_hash, timestamp
+                 FROM traceability_ledger"
+            ).execute(&reopened).await.is_err());
+            assert_eq!(
+                get_ledger_event(&reopened, "test").await.unwrap().unwrap().metric_value,
+                1.0
+            );
+        }
     }
 }
